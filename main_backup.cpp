@@ -138,3 +138,13 @@ enum Gender {
 static bool broad_phase(
     const Trajectory& trajectory_a,
     const Trajectory& trajectory_b);
+
+const char* what() const noexcept override;
+const After* after() const;
+const Timespan* timespan() const;
+
+enum class Mode : uint16_t {
+}
+Regions* regions();
+template<typename T, typename... Args>
+FinalConvexShapePtr make_final_convex(Args&&... args)
