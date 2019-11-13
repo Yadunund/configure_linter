@@ -86,6 +86,10 @@ std::vector<Foo<A>> a;
 Foo* foo;
 const Foo* foo;
 
+int i = 10;
+int* ptr = &i;
+
+
 // template
 template<typename Iter>
 class Foo
