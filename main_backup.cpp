@@ -130,3 +130,8 @@ class EnumType
     Enum3
   };
 }
+
+enum Gender 
+{  Male, 
+   Female 
+}; 
