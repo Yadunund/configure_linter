@@ -167,3 +167,5 @@ private:
   int a;
 
 }
+
+double rotation_thresh = 1.0 * M_PI/180.0,
