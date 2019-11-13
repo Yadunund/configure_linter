@@ -123,16 +123,14 @@ switch (value)
 // enum
 class EnumType
 {
-  enum
-  {
+  enum {
     Enum1,
     Enum2,
     Enum3
   };
 }
 
-enum Gender
-{
+enum Gender {
   Male,
   Female
 };

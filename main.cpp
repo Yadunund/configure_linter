@@ -70,11 +70,11 @@ struct StructName
 
 // control statements
 
-if (some_condition && other_condition)
+if (some_condition && other_condition) {
   foo();
+}
 
-for (std::size_t i = 0; i < num; ++i)
-{
+for (std::size_t i = 0; i < num; ++i) {
 }
 
 // assignment operator
@@ -123,16 +123,14 @@ switch (value)
 // enum
 class EnumType
 {
-  enum
-  {
+  enum {
     Enum1,
     Enum2,
     Enum3
   };
 }
 
-enum Gender
-{
+enum Gender {
   Male,
   Female
 };
