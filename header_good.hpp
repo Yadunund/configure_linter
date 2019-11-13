@@ -23,3 +23,4 @@ public:
 } // namespace test
 
 #endif // __HOME__YADU__DESKTOP__HEADER_GOOD_HPP_
+

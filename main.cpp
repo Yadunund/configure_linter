@@ -48,8 +48,8 @@ public:
   ///
   /// \return some result
   ResultType snake_case_member_functions(
-    InputValue in_value,
-    OutputValue& out_value) const;
+      InputValue in_value,
+      OutputValue& out_value) const;
 
   ResultType snake_case_member_functions2(int a);
 
@@ -134,3 +134,7 @@ enum Gender {
   Male,
   Female
 };
+
+static bool broad_phase(
+    const Trajectory& trajectory_a,
+    const Trajectory& trajectory_b);
