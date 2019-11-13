@@ -147,4 +147,23 @@ enum class Mode : uint16_t {
 }
 Regions* regions();
 template<typename T, typename... Args>
-FinalConvexShapePtr make_final_convex(Args&&... args)
+FinalConvexShapePtr make_final_convex(Args&& ... args)
+
+Class A
+{
+public:
+  type1 func_a();
+
+  Class B
+  {
+  public:
+    type2 func_b();
+  private:
+    int b;
+
+  };
+
+private:
+  int a;
+
+}
