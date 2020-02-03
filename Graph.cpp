@@ -42,7 +42,7 @@ public:
   {
     Waypoint result;
     result._pimpl = rmf_utils::make_impl<Implementation>(
-          Implementation{std::forward<Args>(args)...});
+        Implementation{std::forward<Args>(args)...});
 
     return result;
   }
@@ -106,29 +106,30 @@ class AcceptableOrientationConstraint : public Graph::OrientationConstraint
 public:
 
   AcceptableOrientationConstraint(std::vector<double> acceptable)
-    : orientations(std::move(acceptable))
+  : orientations(std::move(acceptable))
   {
     // Do nothing
   }
 
   std::vector<double> orientations;
 
-  bool apply(Eigen::Vector3d& position,
-             const Eigen::Vector2d& /*course_vector*/) const final
+  bool apply(
+      Eigen::Vector3d& position,
+      const Eigen::Vector2d& /*course_vector*/) const final
   {
     assert(!orientations.empty());
     // This constraint can never be satisfied if there are no acceptable
     // orientations.
-    if(orientations.empty())
+    if (orientations.empty())
       return false;
 
     const double p = position[2];
     double closest = p;
     double best_diff = std::numeric_limits<double>::infinity();
-    for(const double theta : orientations)
+    for (const double theta : orientations)
     {
       const double diff = std::abs(rmf_utils::wrap_to_pi(theta - p));
-      if(diff < best_diff)
+      if (diff < best_diff)
       {
         closest = theta;
         best_diff = diff;
@@ -166,9 +167,9 @@ public:
   DirectionConstraint(
       Direction _direction,
       const Eigen::Vector2d& _forward_vector)
-    : R_f(compute_forward_offset(_forward_vector)),
-      R_f_inv(R_f.inverse()),
-      direction(_direction)
+  : R_f(compute_forward_offset(_forward_vector)),
+    R_f_inv(R_f.inverse()),
+    direction(_direction)
   {
     // Do nothing
   }
@@ -181,9 +182,9 @@ public:
       const Eigen::Vector2d& course_vector) const
   {
     const Eigen::Rotation2Dd R_c(
-          std::atan2(course_vector[1], course_vector[0]));
+        std::atan2(course_vector[1], course_vector[0]));
 
-    if(Direction::Backward == direction)
+    if (Direction::Backward == direction)
       return R_pi * R_c * R_f_inv;
 
     return R_c * R_f_inv;
@@ -213,7 +214,7 @@ rmf_utils::clone_ptr<Graph::OrientationConstraint>
 Graph::OrientationConstraint::make(std::vector<double> acceptable_orientations)
 {
   return rmf_utils::make_clone<AcceptableOrientationConstraint>(
-        std::move(acceptable_orientations));
+      std::move(acceptable_orientations));
 }
 
 //==============================================================================
@@ -290,12 +291,12 @@ Graph::Lane::LiftDoor::LiftDoor(
     std::string lift_name,
     std::string floor_name,
     Duration duration)
-  : _pimpl(rmf_utils::make_impl<Implementation>(
-             Implementation{
-               std::move(lift_name),
-               std::move(floor_name),
-               duration
-             }))
+: _pimpl(rmf_utils::make_impl<Implementation>(
+      Implementation{
+      std::move(lift_name),
+      std::move(floor_name),
+      duration
+    }))
 {
   // Do nothing
 }
@@ -626,7 +627,7 @@ public:
   {
     Lane lane;
     lane._pimpl = rmf_utils::make_impl<Implementation>(
-          Implementation{std::forward<Args>(args)...});
+        Implementation{std::forward<Args>(args)...});
 
     return lane;
   }
@@ -658,7 +659,7 @@ Graph::Lane::Lane()
 
 //==============================================================================
 Graph::Graph()
-  : _pimpl(rmf_utils::make_impl<Implementation>())
+: _pimpl(rmf_utils::make_impl<Implementation>())
 {
   // Do nothing
 }
