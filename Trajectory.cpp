@@ -508,7 +508,7 @@ void Trajectory::Segment::adjust_finish_times(Duration delta_t)
     if (new_time <= predecessor_it->data.finish_time)
     {
       const auto tp = predecessor_it->data.finish_time
-          .time_since_epoch().count();
+            .time_since_epoch().count();
       const auto tc = (new_time).time_since_epoch().count();
 
       const std::string error =
@@ -761,8 +761,8 @@ auto Trajectory::base_iterator<SegT>::operator--(int) -> base_iterator
 //==============================================================================
 #define DEFINE_BASIC_ITERATOR_OP(op) \
   template<typename SegT> \
-  bool Trajectory::base_iterator<SegT>::operator op ( \
-      const base_iterator& other) const \
+  bool Trajectory::base_iterator<SegT>::operator op( \
+    const base_iterator& other) const \
   { \
     return _pimpl->raw_iterator op other._pimpl->raw_iterator; \
   }
@@ -791,7 +791,7 @@ bool Trajectory::base_iterator<SegT>::operator<(
 
   // If they are both valid iterators, then we can compare their times.
   return this->_pimpl->raw_iterator->data.finish_time
-      < other._pimpl->raw_iterator->data.finish_time;
+         < other._pimpl->raw_iterator->data.finish_time;
 }
 
 //==============================================================================
@@ -813,7 +813,7 @@ bool Trajectory::base_iterator<SegT>::operator>(
 
   // If they are both valid iterators, then we can compare their times.
   return this->_pimpl->raw_iterator->data.finish_time
-      > other._pimpl->raw_iterator->data.finish_time;
+         > other._pimpl->raw_iterator->data.finish_time;
 }
 
 //==============================================================================
