@@ -596,14 +596,14 @@ auto Graph::Lane::Node::event() const -> const Event*
 
 //==============================================================================
 auto Graph::Lane::Node::orientation_constraint() const
--> const OrientationConstraint*
+  -> const OrientationConstraint*
 {
   return _pimpl->_orientation.get();
 }
 
 //==============================================================================
 auto Graph::Lane::Node::velocity_constraint() const
--> const VelocityConstraint*
+  -> const VelocityConstraint*
 {
   return _pimpl->_velocity.get();
 }
