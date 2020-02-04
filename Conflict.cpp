@@ -97,7 +97,7 @@ const char* invalid_trajectory_error::what() const noexcept
 
 //==============================================================================
 invalid_trajectory_error::invalid_trajectory_error()
-  : _pimpl(rmf_utils::make_impl<Implementation>())
+: _pimpl(rmf_utils::make_impl<Implementation>())
 {
   // This constructor is a no-op, but we'll keep a definition for it in case we
   // need it in the future. Allowing the default constructor to be inferred
@@ -111,7 +111,7 @@ std::vector<ConflictData> DetectConflict::between(
     const Trajectory& trajectory_a,
     const Trajectory& trajectory_b)
 {
-  if(!broad_phase(trajectory_a, trajectory_b))
+  if (!broad_phase(trajectory_a, trajectory_b))
     return {};
 
   return narrow_phase(trajectory_a, trajectory_b);
@@ -122,20 +122,20 @@ bool DetectConflict::broad_phase(
     const Trajectory& trajectory_a,
     const Trajectory& trajectory_b)
 {
-  if(trajectory_a.get_map_name() != trajectory_b.get_map_name())
+  if (trajectory_a.get_map_name() != trajectory_b.get_map_name())
     return false;
 
   const auto* t_a0 = trajectory_a.start_time();
   const auto* t_bf = trajectory_b.finish_time();
 
-  if(!t_a0 || !t_bf)
+  if (!t_a0 || !t_bf)
   {
     // If the start or finish time of either Trajectory is missing, then it is
     // an empty Trajectory, and so no conflict can happen.
     return false;
   }
 
-  if(*t_bf < *t_a0)
+  if (*t_bf < *t_a0)
   {
     // If Trajectory `b` finishes before Trajectory `a` starts, then there
     // cannot be any conflict.
@@ -145,7 +145,7 @@ bool DetectConflict::broad_phase(
   const auto* t_b0 = trajectory_b.start_time();
   const auto* t_af = trajectory_a.finish_time();
 
-  if(*t_af < *t_b0)
+  if (*t_af < *t_b0)
   {
     // If Trajectory `a` finished before Trajectory `b` starts, then there
     // cannot be any conflict.
@@ -165,21 +165,21 @@ using GeometryMap = std::unordered_map<
 GeometryMap make_geometry_map(std::vector<const Trajectory*> trajectories)
 {
   GeometryMap result;
-  for(const Trajectory* trajectory : trajectories)
+  for (const Trajectory* trajectory : trajectories)
   {
-    for(Trajectory::const_iterator it = trajectory->cbegin();
+    for (Trajectory::const_iterator it = trajectory->cbegin();
         it != trajectory->cend(); ++it)
     {
       const Trajectory::ConstProfilePtr profile = it->get_profile();
       const geometry::ConstConvexShapePtr shape = profile->get_shape();
-      if(!shape)
+      if (!shape)
       {
         throw invalid_trajectory_error::Implementation
           ::make_missing_shape_error(it->get_finish_time());
       }
 
       auto insertion = result.emplace(shape, nullptr);
-      if(insertion.second)
+      if (insertion.second)
       {
         const auto fcl_shapes = shape->_get_internal()->make_fcl();
         assert(fcl_shapes.size() == 1);
@@ -214,10 +214,10 @@ get_initial_iterators(
     const Trajectory& trajectory_b)
 {
   std::size_t min_size = std::min(trajectory_a.size(), trajectory_b.size());
-  if(min_size < 2)
+  if (min_size < 2)
   {
     throw invalid_trajectory_error::Implementation
-        ::make_segment_num_error(min_size);
+          ::make_segment_num_error(min_size);
   }
 
   const Time& t_a0 = *trajectory_a.start_time();
@@ -226,14 +226,14 @@ get_initial_iterators(
   Trajectory::const_iterator a_it;
   Trajectory::const_iterator b_it;
 
-  if(t_a0 < t_b0)
+  if (t_a0 < t_b0)
   {
     // Trajectory `a` starts first, so we begin evaluating at the time
     // that `b` begins
     a_it = trajectory_a.find(t_b0);
     b_it = ++trajectory_b.begin();
   }
-  else if(t_b0 < t_a0)
+  else if (t_b0 < t_a0)
   {
     // Trajectory `b` starts first, so we begin evaluating at the time
     // that `a` begins
@@ -260,7 +260,7 @@ public:
   {
     ConflictData result;
     result._pimpl = rmf_utils::make_impl<ConflictData::Implementation>(
-          ConflictData::Implementation{time, std::move(segments)});
+        ConflictData::Implementation{time, std::move(segments)});
 
     return result;
   }
@@ -272,10 +272,10 @@ std::vector<ConflictData> DetectConflict::narrow_phase(
     const Trajectory& trajectory_b)
 {
   std::size_t min_size = std::min(trajectory_a.size(), trajectory_b.size());
-  if(min_size < 2)
+  if (min_size < 2)
   {
     throw invalid_trajectory_error::Implementation
-        ::make_segment_num_error(min_size);
+          ::make_segment_num_error(min_size);
   }
 
   Trajectory::const_iterator a_it;
@@ -304,17 +304,17 @@ std::vector<ConflictData> DetectConflict::narrow_phase(
   fcl::ContinuousCollisionResult result;
   std::vector<ConflictData> conflicts;
 
-  while(a_it != trajectory_a.end() && b_it != trajectory_b.end())
+  while (a_it != trajectory_a.end() && b_it != trajectory_b.end())
   {
     // Increment a_it until spline_a will overlap with spline_b
-    if(a_it->get_finish_time() < spline_b.start_time())
+    if (a_it->get_finish_time() < spline_b.start_time())
     {
       ++a_it;
       continue;
     }
 
     // Increment b_it until spline_b will overlap with spline_a
-    if(b_it->get_finish_time() < spline_a.start_time())
+    if (b_it->get_finish_time() < spline_a.start_time())
     {
       ++b_it;
       continue;
@@ -339,12 +339,12 @@ std::vector<ConflictData> DetectConflict::narrow_phase(
     *motion_b = spline_b.to_fcl(start_time, finish_time);
 
     const auto obj_a = fcl::ContinuousCollisionObject(
-          geometries.at(profile_a->get_shape()), motion_a);
+        geometries.at(profile_a->get_shape()), motion_a);
     const auto obj_b = fcl::ContinuousCollisionObject(
-          geometries.at(profile_b->get_shape()), motion_b);
+        geometries.at(profile_b->get_shape()), motion_b);
 
     fcl::collide(&obj_a, &obj_b, request, result);
-    if(result.is_collide)
+    if (result.is_collide)
     {
       const double scaled_time = result.time_of_contact;
       const Duration delta_t{
@@ -353,11 +353,11 @@ std::vector<ConflictData> DetectConflict::narrow_phase(
       conflicts.emplace_back(Implementation::make_conflict(time, {a_it, b_it}));
     }
 
-    if(spline_a.finish_time() < spline_b.finish_time())
+    if (spline_a.finish_time() < spline_b.finish_time())
     {
       ++a_it;
     }
-    else if(spline_b.finish_time() < spline_a.finish_time())
+    else if (spline_b.finish_time() < spline_a.finish_time())
     {
       ++b_it;
     }
