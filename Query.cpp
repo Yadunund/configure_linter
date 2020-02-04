@@ -77,12 +77,12 @@ public:
           std::make_move_iterator(maps.begin()),
           std::make_move_iterator(maps.end())};
 
-    if(lower_bound)
+    if (lower_bound)
       span._pimpl->lower_bound = *lower_bound;
     else
       span._pimpl->lower_bound = rmf_utils::nullopt;
 
-    if(upper_bound)
+    if (upper_bound)
       span._pimpl->upper_bound = *upper_bound;
     else
       span._pimpl->upper_bound = rmf_utils::nullopt;
@@ -105,8 +105,8 @@ public:
   // regions_instance and timespan_instance uninitialized until they actually
   // get used.
   Implementation()
-    : regions_instance(Regions::Implementation::make({})),
-      timespan_instance(Timespan::Implementation::make({}, nullptr, nullptr))
+  : regions_instance(Regions::Implementation::make({})),
+    timespan_instance(Timespan::Implementation::make({}, nullptr, nullptr))
   {
     // Do nothing
   }
@@ -114,21 +114,21 @@ public:
 
 //==============================================================================
 Query::Spacetime::Spacetime()
-  : _pimpl(rmf_utils::make_impl<Implementation>())
+: _pimpl(rmf_utils::make_impl<Implementation>())
 {
   query_all();
 }
 
 //==============================================================================
 Query::Spacetime::Spacetime(std::vector<Region> regions)
-  : _pimpl(rmf_utils::make_impl<Implementation>())
+: _pimpl(rmf_utils::make_impl<Implementation>())
 {
   query_regions(std::move(regions));
 }
 
 //==============================================================================
 Query::Spacetime::Spacetime(std::vector<std::string> maps)
-  : _pimpl(rmf_utils::make_impl<Implementation>())
+: _pimpl(rmf_utils::make_impl<Implementation>())
 {
   query_timespan(std::move(maps));
 }
@@ -137,7 +137,7 @@ Query::Spacetime::Spacetime(std::vector<std::string> maps)
 Query::Spacetime::Spacetime(
     std::vector<std::string> maps,
     Time lower_bound)
-  : _pimpl(rmf_utils::make_impl<Implementation>())
+: _pimpl(rmf_utils::make_impl<Implementation>())
 {
   query_timespan(std::move(maps), lower_bound);
 }
@@ -147,7 +147,7 @@ Query::Spacetime::Spacetime(
     std::vector<std::string> maps,
     Time lower_bound,
     Time upper_bound)
-  : _pimpl(rmf_utils::make_impl<Implementation>())
+: _pimpl(rmf_utils::make_impl<Implementation>())
 {
   query_timespan(std::move(maps), lower_bound, upper_bound);
 }
@@ -188,7 +188,7 @@ auto Query::Spacetime::Regions::erase(
     iterator first, iterator last) -> iterator
 {
   return Implementation::make_iterator(
-        _pimpl->regions.erase(first._pimpl->iter, last._pimpl->iter));
+      _pimpl->regions.erase(first._pimpl->iter, last._pimpl->iter));
 }
 
 //==============================================================================
@@ -201,7 +201,7 @@ auto Query::Spacetime::Regions::begin() -> iterator
 auto Query::Spacetime::Regions::begin() const -> const_iterator
 {
   return Implementation::make_iterator(
-        const_cast<Implementation::RegionSet&>(_pimpl->regions).begin());
+      const_cast<Implementation::RegionSet&>(_pimpl->regions).begin());
 }
 
 //==============================================================================
@@ -220,7 +220,7 @@ auto Query::Spacetime::Regions::end() -> iterator
 auto Query::Spacetime::Regions::end() const -> const_iterator
 {
   return Implementation::make_iterator(
-        const_cast<Implementation::RegionSet&>(_pimpl->regions).end());
+      const_cast<Implementation::RegionSet&>(_pimpl->regions).end());
 }
 
 //==============================================================================
@@ -237,7 +237,7 @@ std::size_t Query::Spacetime::Regions::size() const
 
 //==============================================================================
 Query::Spacetime::Regions::Regions()
-  : _pimpl(rmf_utils::make_impl<Implementation>())
+: _pimpl(rmf_utils::make_impl<Implementation>())
 {
   // Do nothing
 }
@@ -267,7 +267,7 @@ auto Query::Spacetime::Timespan::remove_map(const std::string& map_name)
 //==============================================================================
 const Time* Query::Spacetime::Timespan::get_lower_time_bound() const
 {
-  if(_pimpl->lower_bound)
+  if (_pimpl->lower_bound)
     return &(*_pimpl->lower_bound);
 
   return nullptr;
@@ -290,7 +290,7 @@ auto Query::Spacetime::Timespan::remove_lower_time_bound() -> Timespan&
 //==============================================================================
 const Time* Query::Spacetime::Timespan::get_upper_time_bound() const
 {
-  if(_pimpl->upper_bound)
+  if (_pimpl->upper_bound)
     return &(*_pimpl->upper_bound);
 
   return nullptr;
@@ -312,7 +312,7 @@ auto Query::Spacetime::Timespan::remove_upper_time_bound() -> Timespan&
 
 //==============================================================================
 Query::Spacetime::Timespan::Timespan()
-  : _pimpl(rmf_utils::make_impl<Implementation>())
+: _pimpl(rmf_utils::make_impl<Implementation>())
 {
   // Do nothing
 }
@@ -329,7 +329,7 @@ auto Query::Spacetime::query_regions(std::vector<Region> regions) -> Regions&
 //==============================================================================
 auto Query::Spacetime::regions() -> Regions*
 {
-  if(Mode::Regions == _pimpl->mode)
+  if (Mode::Regions == _pimpl->mode)
     return &_pimpl->regions_instance;
 
   return nullptr;
@@ -338,7 +338,7 @@ auto Query::Spacetime::regions() -> Regions*
 //==============================================================================
 auto Query::Spacetime::regions() const -> const Regions*
 {
-  if(Mode::Regions == _pimpl->mode)
+  if (Mode::Regions == _pimpl->mode)
     return &_pimpl->regions_instance;
 
   return nullptr;
@@ -385,7 +385,7 @@ auto Query::Spacetime::query_timespan(
 //==============================================================================
 auto Query::Spacetime::timespan() -> Timespan*
 {
-  if(Mode::Timespan == _pimpl->mode)
+  if (Mode::Timespan == _pimpl->mode)
     return &_pimpl->timespan_instance;
 
   return nullptr;
@@ -394,7 +394,7 @@ auto Query::Spacetime::timespan() -> Timespan*
 //==============================================================================
 auto Query::Spacetime::timespan() const -> const Timespan*
 {
-  if(Mode::Timespan == _pimpl->mode)
+  if (Mode::Timespan == _pimpl->mode)
     return &_pimpl->timespan_instance;
 
   return nullptr;
@@ -417,7 +417,7 @@ public:
 
 //==============================================================================
 Query::Versions::After::After(Version version)
-  : _pimpl(rmf_utils::make_impl<Implementation>(Implementation{version}))
+: _pimpl(rmf_utils::make_impl<Implementation>(Implementation{version}))
 {
   // Do nothing
 }
@@ -454,14 +454,14 @@ auto Query::Versions::After::set_version(Version version) -> After&
 
 //==============================================================================
 Query::Versions::Versions()
-  : _pimpl(rmf_utils::make_impl<Implementation>())
+: _pimpl(rmf_utils::make_impl<Implementation>())
 {
   query_all();
 }
 
 //==============================================================================
 Query::Versions::Versions(Version version)
-  : _pimpl(rmf_utils::make_impl<Implementation>())
+: _pimpl(rmf_utils::make_impl<Implementation>())
 {
   query_after(version);
 }
@@ -483,7 +483,7 @@ auto Query::Versions::query_all() -> All&
 auto Query::Versions::query_after(Version version) -> After&
 {
   _pimpl->mode = Mode::After;
-  if(_pimpl->after_instance._pimpl)
+  if (_pimpl->after_instance._pimpl)
     _pimpl->after_instance.set_version(version);
   else
     _pimpl->after_instance = After(version);
@@ -494,7 +494,7 @@ auto Query::Versions::query_after(Version version) -> After&
 //==============================================================================
 auto Query::Versions::after() -> After*
 {
-  if(Mode::After == _pimpl->mode)
+  if (Mode::After == _pimpl->mode)
     return &_pimpl->after_instance;
 
   return nullptr;
@@ -503,7 +503,7 @@ auto Query::Versions::after() -> After*
 //==============================================================================
 auto Query::Versions::after() const -> const After*
 {
-  if(Mode::After == _pimpl->mode)
+  if (Mode::After == _pimpl->mode)
     return &_pimpl->after_instance;
 
   return nullptr;
@@ -545,10 +545,10 @@ public:
     Query result;
     result.spacetime().query_timespan(std::move(maps));
     auto& timespan = *result.spacetime().timespan();
-    if(start_time)
+    if (start_time)
       timespan.set_lower_time_bound(*start_time);
 
-    if(finish_time)
+    if (finish_time)
       timespan.set_upper_time_bound(*finish_time);
 
     return result;
@@ -592,7 +592,7 @@ auto Query::versions() const -> const Versions&
 
 //==============================================================================
 Query::Query()
-  : _pimpl(rmf_utils::make_impl<Implementation>())
+: _pimpl(rmf_utils::make_impl<Implementation>())
 {
   // Do nothing
 }
@@ -622,7 +622,7 @@ Query make_query(
     const Time* finish_time)
 {
   return Query::Implementation::make_query(
-        std::move(maps), start_time, finish_time);
+      std::move(maps), start_time, finish_time);
 }
 
 //==============================================================================
