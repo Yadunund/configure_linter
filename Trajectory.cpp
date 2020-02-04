@@ -205,12 +205,12 @@ public:
   iterator erase(iterator first, iterator last)
   {
     const auto seg_begin = first->_pimpl->myself;
-    const auto seg_end = last._pimpl->raw_iterator == segments.end()?
-          segments.end() : last->_pimpl->myself;
+    const auto seg_end = last._pimpl->raw_iterator == segments.end() ?
+        segments.end() : last->_pimpl->myself;
 
     const auto order_start = ordering.find(seg_begin->data.finish_time);
-    const auto order_end = seg_end == segments.end()?
-          ordering.end() : ordering.find(seg_end->data.finish_time);
+    const auto order_end = seg_end == segments.end() ?
+        ordering.end() : ordering.find(seg_end->data.finish_time);
 
     ordering.erase(order_start, order_end);
     return make_iterator<Segment>(segments.erase(seg_begin, seg_end));
@@ -689,23 +689,23 @@ Trajectory::const_iterator Trajectory::cend() const
 const Time* Trajectory::start_time() const
 {
   const auto& segments = _pimpl->segments;
-  return segments.size() == 0? nullptr : &segments.front().data.finish_time;
+  return segments.size() == 0 ? nullptr : &segments.front().data.finish_time;
 }
 
 //==============================================================================
 const Time* Trajectory::finish_time() const
 {
   const auto& segments = _pimpl->segments;
-  return segments.size() == 0? nullptr : &segments.back().data.finish_time;
+  return segments.size() == 0 ? nullptr : &segments.back().data.finish_time;
 }
 
 //==============================================================================
 Duration Trajectory::duration() const
 {
   const auto& segments = _pimpl->segments;
-  return segments.size() < 2?
-        Duration(0) :
-        segments.back().data.finish_time - segments.front().data.finish_time;
+  return segments.size() < 2 ?
+         Duration(0) :
+         segments.back().data.finish_time - segments.front().data.finish_time;
 }
 
 //==============================================================================
