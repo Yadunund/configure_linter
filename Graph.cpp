@@ -241,10 +241,10 @@ Graph::Lane::Door::Door(
     std::string name,
     Duration duration)
 : _pimpl(rmf_utils::make_impl<Implementation>(
-           Implementation{
-             std::move(name),
-             duration
-           }))
+      Implementation{
+        std::move(name),
+        duration
+      }))
 {
   // Do nothing
 }
@@ -293,10 +293,10 @@ Graph::Lane::LiftDoor::LiftDoor(
     Duration duration)
 : _pimpl(rmf_utils::make_impl<Implementation>(
       Implementation{
-      std::move(lift_name),
-      std::move(floor_name),
-      duration
-    }))
+        std::move(lift_name),
+        std::move(floor_name),
+        duration
+      }))
 {
   // Do nothing
 }
@@ -359,11 +359,11 @@ Graph::Lane::LiftMove::LiftMove(
     std::string destination_floor_name,
     Duration duration)
 : _pimpl(rmf_utils::make_impl<Implementation>(
-           Implementation{
-             std::move(lift_name),
-             std::move(destination_floor_name),
-             duration
-           }))
+      Implementation{
+        std::move(lift_name),
+        std::move(destination_floor_name),
+        duration
+      }))
 {
   // Do nothing
 }
@@ -422,10 +422,10 @@ Graph::Lane::Dock::Dock(
     std::string dock_name,
     Duration duration)
 : _pimpl(rmf_utils::make_impl<Implementation>(
-           Implementation{
-             std::move(dock_name),
-             duration
-           }))
+      Implementation{
+        std::move(dock_name),
+        duration
+      }))
 {
   // Do nothing
 }
@@ -557,12 +557,12 @@ Graph::Lane::Node::Node(
     rmf_utils::clone_ptr<OrientationConstraint> orientation,
     rmf_utils::clone_ptr<VelocityConstraint> velocity)
 : _pimpl(rmf_utils::make_impl<Implementation>(
-             Implementation{
-               waypoint_index,
-               std::move(event),
-               std::move(orientation),
-               std::move(velocity)
-             }))
+      Implementation{
+        waypoint_index,
+        std::move(event),
+        std::move(orientation),
+        std::move(velocity)
+      }))
 {
   // Do nothing
 }
@@ -572,12 +572,12 @@ Graph::Lane::Node::Node(
     std::size_t waypoint_index,
     rmf_utils::clone_ptr<OrientationConstraint> orientation)
 : _pimpl(rmf_utils::make_impl<Implementation>(
-           Implementation{
-             waypoint_index,
-             nullptr,
-             std::move(orientation),
-             nullptr
-           }))
+      Implementation{
+        waypoint_index,
+        nullptr,
+        std::move(orientation),
+        nullptr
+      }))
 {
   // Do nothing
 }
