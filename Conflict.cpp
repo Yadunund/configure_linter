@@ -175,7 +175,7 @@ GeometryMap make_geometry_map(std::vector<const Trajectory*> trajectories)
       if (!shape)
       {
         throw invalid_trajectory_error::Implementation
-          ::make_missing_shape_error(it->get_finish_time());
+                ::make_missing_shape_error(it->get_finish_time());
       }
 
       auto insertion = result.emplace(shape, nullptr);
@@ -217,7 +217,7 @@ get_initial_iterators(
   if (min_size < 2)
   {
     throw invalid_trajectory_error::Implementation
-          ::make_segment_num_error(min_size);
+            ::make_segment_num_error(min_size);
   }
 
   const Time& t_a0 = *trajectory_a.start_time();
@@ -275,7 +275,7 @@ std::vector<ConflictData> DetectConflict::narrow_phase(
   if (min_size < 2)
   {
     throw invalid_trajectory_error::Implementation
-          ::make_segment_num_error(min_size);
+            ::make_segment_num_error(min_size);
   }
 
   Trajectory::const_iterator a_it;
