@@ -16,73 +16,99 @@
 */
 
 
-#ifndef RMF_TRAFFIC__CONVEXSHAPE_HPP
-#define RMF_TRAFFIC__CONVEXSHAPE_HPP
+#ifndef RMF_TRAFFIC__GEOMETRY__SHAPE_HPP
+#define RMF_TRAFFIC__GEOMETRY__SHAPE_HPP
 
-#include <rmf_traffic/geometry/Shape.hpp>
+#include <rmf_utils/impl_ptr.hpp>
 
 #include <memory>
 
 namespace rmf_traffic {
 namespace geometry {
 
-class FinalConvexShape;
+class FinalShape;
 
 //==============================================================================
-/// \brief This class is a more specific type of Shape. The Zone class can
-/// consume any kind of Shape, but the Trajectory class can only consume
-/// ConvexShape types.
+/// \brief This is the base class of different shape classes that can be used
+/// by the rmf_traffic library. This cannot (currently) be extended
+/// by downstream libraries; instead, users must choose one of the pre-defined
+/// shape types belonging to this library.
 ///
-/// \sa Box, Circle
-class ConvexShape : public Shape
+/// \sa Box, Circle, Polygon
+class Shape
 {
 public:
 
-  /// Finalize the shape more specifically as a ConvexShape
-  virtual FinalConvexShape finalize_convex() const = 0;
+  /// Finalize the shape so that it can be given to a Trajectory::Profile or a
+  /// Zone.
+  virtual FinalShape finalize() const = 0;
+
+  // Abstract shape references must not be moved, because we cannot ensure that
+  // they get moved into the same derived type.
+  Shape(Shape&&) = delete;
+  Shape& operator=(Shape&&) = delete;
+
+  /// \internal
+  class Internal;
+  virtual ~Shape();
 
 protected:
 
-  ConvexShape(std::unique_ptr<Shape::Internal> internal);
+  Internal* _get_internal();
+
+  const Internal* _get_internal() const;
+
+  /// \internal
+  Shape(std::unique_ptr<Internal> internal);
+
+private:
+
+  std::unique_ptr<Internal> _internal;
 
 };
 
-using ConvexShapePtr = std::shared_ptr<ConvexShape>;
-using ConstConvexShapePtr = std::shared_ptr<const ConvexShape>;
+using ShapePtr = std::shared_ptr<Shape>;
+using ConstShapePtr = std::shared_ptr<const Shape>;
 
 //==============================================================================
-/// This is a finalized ConvexShape whose parameters can no longer be mutated
-class FinalConvexShape : public FinalShape
+/// This is a finalized shape whose parameters can no longer be mutated.
+class FinalShape
 {
 public:
 
-  // No API is needed here
+  /// Look at the source of this FinalShape to inspect its parameters.
+  const Shape& source() const;
+  
+  /// Get the characteristic length of this FinalShape
+  double get_characteristic_length() const;
+
+  virtual ~FinalShape() = default;
 
   class Implementation;
 protected:
-  FinalConvexShape();
+  FinalShape();
+  rmf_utils::impl_ptr<Implementation> _pimpl;
 };
 
-using FinalConvexShapePtr = std::shared_ptr<FinalConvexShape>;
-using ConstFinalConvexShapePtr = std::shared_ptr<const FinalConvexShape>;
+using FinalShapePtr = std::shared_ptr<FinalShape>;
+using ConstFinalShapePtr = std::shared_ptr<const FinalShape>;
 
 //==============================================================================
 template<typename T, typename... Args>
-FinalConvexShapePtr make_final_convex(Args&&... args)
+FinalShapePtr make_final(Args&&... args)
 {
-  return std::make_shared<FinalConvexShape>(
-        T(std::forward<Args>(args)...).finalize_convex());
+  return std::make_shared<FinalShape>(
+        T(std::forward<Args>(args)...).finalize());
 }
 
 //==============================================================================
 template<typename T>
-FinalConvexShapePtr make_final_convex(const T& convex)
+FinalShapePtr make_final(const T& shape)
 {
-  return std::make_shared<FinalConvexShape>(convex.finalize_convex());
+  return std::make_shared<FinalShape>(shape.finalize());
 }
 
 } // namespace geometry
 } // namespace rmf_traffic
 
-#endif // RMF_TRAFFIC__CONVEXSHAPE_HPP
-
+#endif // RMF_TRAFFIC__GEOMETRY__SHAPE_HPP
