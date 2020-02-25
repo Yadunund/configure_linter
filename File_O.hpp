@@ -762,8 +762,7 @@ void ChangeRelevanceInspector::inspect(
     const rmf_traffic::internal::Spacetime& spacetime)
 {
   inspect(entry,
-  [&](const ConstEntryPtr& e) -> bool
-  {
+  [&](const ConstEntryPtr& e) -> bool {
     const Trajectory& trajectory = e->trajectory;
     if(trajectory.start_time())
     {
