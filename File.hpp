@@ -15,613 +15,964 @@
  *
 */
 
-#include "geometry/ShapeInternal.hpp"
-#include "DetectConflictInternal.hpp"
-#include "Spline.hpp"
-#include "StaticMotion.hpp"
+#include "ViewerInternal.hpp"
 
-#include <rmf_traffic/Conflict.hpp>
+#include "../detail/internal_bidirectional_iterator.hpp"
 
-#include <fcl/continuous_collision.h>
-#include <fcl/ccd/motion.h>
+#include <rmf_traffic/schedule/Database.hpp>
 
-#include <unordered_map>
+#include <algorithm>
 
 namespace rmf_traffic {
+namespace schedule {
 
 //==============================================================================
-class ConflictData::Implementation
+class Database::Change::Implementation
 {
 public:
 
-  Time time;
-  Segments segments;
+  Mode mode;
+  Insert insert;
+  Interrupt interrupt;
+  Delay delay;
+  Replace replace;
+  Erase erase;
+  Cull cull;
 
-};
+  Version id;
 
-//==============================================================================
-Time ConflictData::get_time() const
-{
-  return _pimpl->time;
-}
-
-//==============================================================================
-const ConflictData::Segments& ConflictData::get_segments() const
-{
-  return _pimpl->segments;
-}
-
-//==============================================================================
-ConflictData::ConflictData()
-{
-  // Do nothing
-}
-
-//==============================================================================
-class invalid_trajectory_error::Implementation
-{
-public:
-
-  std::string what;
-
-  static invalid_trajectory_error make_segment_num_error(
-      std::size_t num_segments)
+  static Change make(const Mode mode, const Version id)
   {
-    invalid_trajectory_error error;
-    error._pimpl->what = std::string()
-        + "[rmf_traffic::invalid_trajectory_error] Attempted to check a "
-        + "conflict with a Trajectory that has [" + std::to_string(num_segments)
-        + "] segments. This is not supported. Trajectories must have at least "
-        + "2 segments to check them for conflicts.";
-    return error;
+    Change change;
+    change._pimpl->mode = mode;
+    change._pimpl->id = id;
+
+    return change;
   }
 
-  static invalid_trajectory_error make_missing_shape_error(
-      const Time time)
-  {
-    invalid_trajectory_error error;
-    error._pimpl->what = std::string()
-        + "[rmf_traffic::invalid_trajectory_error] Attempting to check a "
-        + "conflict with a Trajectory that has no shape specified for the "
-        + "profile of its segment at time ["
-        + std::to_string(time.time_since_epoch().count())
-        + "ns]. This is not supported.";
+  static Change make_insert_ref(
+      const Trajectory* trajectory,
+      Version id);
 
-    return error;
-  }
+  // Note(MXG): We're not using make_interrupt_ref yet, and perhaps we never
+  // will. In theory this function could be used to save time and memory when a
+  // Database generates a Patch that includes an interrupt, but it would add
+  // complexity to the implementation of Patch generation, so I'm deferring that
+  // feature for later.
+  static Change make_interrupt_ref(
+      Version original_id,
+      const Trajectory* interruption_trajectory,
+      Duration delay,
+      Version id);
+
+  static Change make_replace_ref(
+      Version original_id,
+      const Trajectory* trajectory,
+      Version id);
 };
-
-//==============================================================================
-const char* invalid_trajectory_error::what() const noexcept
-{
-  return _pimpl->what.c_str();
-}
-
-//==============================================================================
-invalid_trajectory_error::invalid_trajectory_error()
-  : _pimpl(rmf_utils::make_impl<Implementation>())
-{
-  // This constructor is a no-op, but we'll keep a definition for it in case we
-  // need it in the future. Allowing the default constructor to be inferred
-  // could cause issues if we want to change the implementation of this
-  // exception in the future, like if we want to add more information to the
-  // error message output.
-}
-
-//==============================================================================
-std::vector<ConflictData> DetectConflict::between(
-    const Trajectory& trajectory_a,
-    const Trajectory& trajectory_b,
-    const bool quit_after_one)
-{
-  if(!broad_phase(trajectory_a, trajectory_b))
-    return {};
-
-  return narrow_phase(trajectory_a, trajectory_b, quit_after_one);
-}
-
-//==============================================================================
 
 namespace {
-
-struct BoundingBox
+//==============================================================================
+// TODO(MXG): Consider generalizing this class using templates if it ends up
+// being useful in any other context.
+class DeepOrShallowTrajectory
 {
-  Eigen::Vector2d min;
-  Eigen::Vector2d max;
+public:
+
+  const Trajectory* get() const
+  {
+    if (is_deep)
+      return deep.get();
+
+    return shallow;
+  }
+
+  rmf_utils::impl_ptr<const Trajectory> deep;
+  const Trajectory* shallow = nullptr;
+  bool is_deep = true;
+
 };
 
-double evaluate_spline(
-    const Eigen::Vector4d& coeffs,
-    const double t)
-{
-  // Assume time is parameterized [0,1]
-  return (coeffs[3] * t * t * t
-      + coeffs[2] * t * t
-      + coeffs[1] * t
-      + coeffs[0]);
-}
-
-std::array<double, 2> get_local_extrema(
-    const Eigen::Vector4d& coeffs)
-{
-  std::vector<double> extrema_candidates;
-  // Store boundary values as potential extrema
-  extrema_candidates.emplace_back(evaluate_spline(coeffs, 0));
-  extrema_candidates.emplace_back(evaluate_spline(coeffs, 1));
-
-  // When derivate of spline motion is not quadratic
-  if (std::abs(coeffs[3]) < 1e-12)
-  {
-    if (std::abs(coeffs[2]) > 1e-12)
-    {
-      double t = -coeffs[1] / (2 * coeffs[2]);
-      extrema_candidates.emplace_back(evaluate_spline(coeffs, t));
-    }
-  }
-  else
-  {
-    // Calculate the discriminant otherwise
-    double D = (4 * pow(coeffs[2], 2) - 12 * coeffs[3] * coeffs[1]);
-
-
-    if (std::abs(D) < 1e-12)
-    {
-      double t = (-2 * coeffs[2]) / (6 * coeffs[3]);
-      double extrema = evaluate_spline(coeffs, t);
-      extrema_candidates.emplace_back(extrema);
-    }
-    else if (D < 0)
-    {
-      assert(false);
-    }
-    else
-    {
-      double t1 = ((-2 * coeffs[2]) + std::sqrt(D)) / (6 * coeffs[3]);
-      double t2 = ((-2 * coeffs[2]) - std::sqrt(D)) / (6 * coeffs[3]);
-
-      extrema_candidates.emplace_back(evaluate_spline(coeffs, t1));
-      extrema_candidates.emplace_back(evaluate_spline(coeffs, t2));
-    }
-  }
-  
-  std::array<double, 2> extrema;
-  assert(!extrema_candidates.empty());
-  extrema[0] = *std::min_element(
-      extrema_candidates.begin(),
-      extrema_candidates.end());
-  extrema[1] = *std::max_element(
-      extrema_candidates.begin(),
-      extrema_candidates.end());
-
-  return extrema;
-}
-
-BoundingBox get_bounding_box(const rmf_traffic::Spline& spline)
-{
-  BoundingBox bounding_box;
-
-  auto params = spline.get_params();
-  std::array<double, 2> extrema_x = get_local_extrema(params.coeffs[0]);
-  std::array<double, 2> extrema_y =  get_local_extrema(params.coeffs[1]);
-
-  Eigen::Vector2d min_coord = Eigen::Vector2d{extrema_x[0], extrema_y[0]};
-  Eigen::Vector2d max_coord = Eigen::Vector2d{extrema_x[1], extrema_y[1]};
-
-  double char_length =  params.profile_ptr->get_shape()
-      ->get_characteristic_length();
-
-  assert(char_length >= 0.0);
-  min_coord -= Eigen::Vector2d{char_length, char_length};
-  max_coord += Eigen::Vector2d{char_length, char_length};
-
-  bounding_box.min = min_coord;
-  bounding_box.max = max_coord;
-
-  return bounding_box;
-}
-
-bool overlap(const BoundingBox& box_a, const BoundingBox& box_b)
-{
-  for (std::size_t i=0; i < 2; ++i)
-  {
-    if (box_a.max[i] < box_b.min[i])
-      return false;
-
-    if (box_b.max[i] < box_a.min[i])
-      return false;
-  }
-
-  return true;
-}
-
 //==============================================================================
-std::shared_ptr<fcl::SplineMotion> make_uninitialized_fcl_spline_motion()
+DeepOrShallowTrajectory make_deep(Trajectory deep)
 {
-  // This function is only necessary because SplineMotion does not provide a
-  // default constructor, and we want to be able to instantiate one before
-  // we have any paramters to provide to it.
-  fcl::Matrix3f R;
-  fcl::Vec3f T;
+  DeepOrShallowTrajectory traj;
+  traj.is_deep = true;
+  traj.deep = rmf_utils::make_impl<const Trajectory>(std::move(deep));
 
-  // The constructor that we are using is a no-op (apparently it was declared,
-  // but its definition is just `// TODO`, so we don't need to worry about
-  // unintended consequences. If we update the version of FCL, this may change,
-  // so I'm going to leave a FIXME tag here to keep us aware of that.
-  return std::make_shared<fcl::SplineMotion>(R, T, R, T);
+  return traj;
 }
 
-//==============================================================================
-std::tuple<Trajectory::const_iterator, Trajectory::const_iterator>
-get_initial_iterators(
-    const Trajectory& trajectory_a,
-    const Trajectory& trajectory_b)
+DeepOrShallowTrajectory make_shallow(const Trajectory* const shallow)
 {
-  std::size_t min_size = std::min(trajectory_a.size(), trajectory_b.size());
-  if(min_size < 2)
-  {
-    throw invalid_trajectory_error::Implementation
-        ::make_segment_num_error(min_size);
-  }
+  DeepOrShallowTrajectory traj;
+  traj.is_deep = false;
+  traj.shallow = shallow;
 
-  const Time& t_a0 = *trajectory_a.start_time();
-  const Time& t_b0 = *trajectory_b.start_time();
-
-  Trajectory::const_iterator a_it;
-  Trajectory::const_iterator b_it;
-
-  if(t_a0 < t_b0)
-  {
-    // Trajectory `a` starts first, so we begin evaluating at the time
-    // that `b` begins
-    a_it = trajectory_a.find(t_b0);
-    b_it = ++trajectory_b.begin();
-  }
-  else if(t_b0 < t_a0)
-  {
-    // Trajectory `b` starts first, so we begin evaluating at the time
-    // that `a` begins
-    a_it = ++trajectory_a.begin();
-    b_it = trajectory_b.find(t_a0);
-  }
-  else
-  {
-    // The Trajectories begin at the exact same time, so both will begin
-    // from their start
-    a_it = ++trajectory_a.begin();
-    b_it = ++trajectory_b.begin();
-  }
-
-  return {a_it, b_it};
-}
-
-//==============================================================================
-fcl::ContinuousCollisionRequest make_fcl_request()
-{
-  fcl::ContinuousCollisionRequest request;
-  request.ccd_solver_type = fcl::CCDC_CONSERVATIVE_ADVANCEMENT;
-  request.gjk_solver_type = fcl::GST_LIBCCD;
-
-  return request;
+  return traj;
 }
 
 } // anonymous namespace
 
-bool DetectConflict::broad_phase(
-    const Trajectory& trajectory_a,
-    const Trajectory& trajectory_b)
-{
-  std::size_t min_size = std::min(trajectory_a.size(), trajectory_b.size());
-  if(min_size < 2)
-  {
-    throw invalid_trajectory_error::Implementation
-        ::make_segment_num_error(min_size);
-  }
-
-  if(trajectory_a.get_map_name() != trajectory_b.get_map_name())
-    return false;
-
-  const auto* t_a0 = trajectory_a.start_time();
-  const auto* t_bf = trajectory_b.finish_time();
-
-  // Neither of these can be null, because both trajectories should have at
-  // least two elements.
-  assert(t_a0 != nullptr);
-  assert(t_bf != nullptr);
-
-  if(*t_bf < *t_a0)
-  {
-    // If Trajectory `b` finishes before Trajectory `a` starts, then there
-    // cannot be any conflict.
-    return false;
-  }
-
-  const auto* t_b0 = trajectory_b.start_time();
-  const auto* t_af = trajectory_a.finish_time();
-
-  // Neither of these can be null, because both trajectories should have at
-  // least two elements.
-  assert(t_b0 != nullptr);
-  assert(t_af != nullptr);
-
-  if(*t_af < *t_b0)
-  {
-    // If Trajectory `a` finished before Trajectory `b` starts, then there
-    // cannot be any conflict.
-    return false;
-  }
-
-  // Iterate through the segments of both trajectories to check for overlapping
-  // bounding boxes
-  Trajectory::const_iterator a_it;
-  Trajectory::const_iterator b_it;
-  std::tie(a_it, b_it) = get_initial_iterators(trajectory_a, trajectory_b);
-  assert(a_it != trajectory_a.end());
-  assert(b_it != trajectory_b.end());
-
-  Spline spline_a(a_it);
-  Spline spline_b(b_it);
-
-  while(a_it != trajectory_a.end() && b_it != trajectory_b.end())
-  {
-    // Increment a_it until spline_a will overlap with spline_b
-    if(a_it->get_finish_time() < spline_b.start_time())
-    {
-      ++a_it;
-      continue;
-    }
-
-    // Increment b_it until spline_b will overlap with spline_a
-    if(b_it->get_finish_time() < spline_a.start_time())
-    {
-      ++b_it;
-      continue;
-    }
-
-    spline_a = Spline(a_it);
-    spline_b = Spline(b_it);
-
-    auto box_a = get_bounding_box(spline_a);
-    auto box_b = get_bounding_box(spline_b);
-
-    if (overlap(box_a, box_b))
-      return true;
-
-    if(spline_a.finish_time() < spline_b.finish_time())
-    {
-      ++a_it;
-    }
-    else if(spline_b.finish_time() < spline_a.finish_time())
-    {
-      ++b_it;
-    }
-    else
-    {
-      ++a_it;
-      ++b_it;
-    }
-  }
-  return false;
-}
-
-class DetectConflict::Implementation
+//==============================================================================
+class Database::Change::Insert::Implementation
 {
 public:
-  static ConflictData make_conflict(Time time, ConflictData::Segments segments)
+
+  /// The trajectory that was inserted
+  DeepOrShallowTrajectory trajectory;
+
+  /// This is used to create a Change whose lifetime is not tied to the Database
+  /// instance that constructed it.
+  static Insert make_copy(Trajectory trajectory)
   {
-    ConflictData result;
-    result._pimpl = rmf_utils::make_impl<ConflictData::Implementation>(
-          ConflictData::Implementation{time, std::move(segments)});
+    Insert result;
+
+    result._pimpl = rmf_utils::make_impl<Implementation>(
+        Implementation{make_deep(std::move(trajectory))});
+
+    return result;
+  }
+
+  /// This is used by Database instances to create a Change without the overhead
+  /// of copying a Trajectory instance. The Change's lifetime will be tied to
+  /// the lifetime of the Database object.
+  static Insert make_ref(const Trajectory* const trajectory)
+  {
+    Insert result;
+
+    result._pimpl = rmf_utils::make_impl<Implementation>(
+        Implementation{make_shallow(trajectory)});
 
     return result;
   }
 };
 
 //==============================================================================
-std::vector<ConflictData> DetectConflict::narrow_phase(
-    const Trajectory& trajectory_a,
-    const Trajectory& trajectory_b,
-    const bool quit_after_one)
+Database::Change::Insert::Insert()
 {
-  Trajectory::const_iterator a_it;
-  Trajectory::const_iterator b_it;
-  std::tie(a_it, b_it) = get_initial_iterators(trajectory_a, trajectory_b);
+  // Do nothing
+}
 
-  // Verify that neither trajectory has run into a bug. These conditions should
-  // be guaranteed by
-  // 1. The assumption that the trajectories overlap (this is an assumption that
-  //    is made explicit to the user)
-  // 2. The min_size check up above
-  assert(a_it != trajectory_a.end());
-  assert(b_it != trajectory_b.end());
+//==============================================================================
+Database::Change::Change()
+: _pimpl(rmf_utils::make_impl<Implementation>())
+{
+  // Do nothing
+}
 
-  // Initialize the objects that will be used inside the loop
-  Spline spline_a(a_it);
-  Spline spline_b(b_it);
-  std::shared_ptr<fcl::SplineMotion> motion_a =
-      make_uninitialized_fcl_spline_motion();
-  std::shared_ptr<fcl::SplineMotion> motion_b =
-      make_uninitialized_fcl_spline_motion();
+//==============================================================================
+auto Database::Change::make_insert(
+    Trajectory trajectory,
+    Version id) -> Change
+{
+  Change change = Implementation::make(Mode::Insert, id);
+  change._pimpl->insert = Insert::Implementation::make_copy(trajectory);
 
-  const fcl::ContinuousCollisionRequest request = make_fcl_request();
-  fcl::ContinuousCollisionResult result;
-  std::vector<ConflictData> conflicts;
+  return change;
+}
 
-  while(a_it != trajectory_a.end() && b_it != trajectory_b.end())
+//==============================================================================
+auto Database::Change::Implementation::make_insert_ref(
+    const Trajectory* const trajectory,
+    const Version id) -> Change
+{
+  Change change = Implementation::make(Mode::Insert, id);
+  change._pimpl->insert = Insert::Implementation::make_ref(trajectory);
+
+  return change;
+}
+
+//==============================================================================
+class Database::Change::Interrupt::Implementation
+{
+public:
+
+  DeepOrShallowTrajectory trajectory;
+  Version original_id;
+  Duration delay;
+
+  template<typename... Args>
+  static Interrupt make_copy(
+      Trajectory trajectory,
+      Args&& ... args)
   {
-    // Increment a_it until spline_a will overlap with spline_b
-    if(a_it->get_finish_time() < spline_b.start_time())
-    {
-      ++a_it;
-      continue;
-    }
+    Interrupt result;
 
-    // Increment b_it until spline_b will overlap with spline_a
-    if(b_it->get_finish_time() < spline_a.start_time())
-    {
-      ++b_it;
-      continue;
-    }
+    result._pimpl = rmf_utils::make_impl<Implementation>(
+        Implementation{make_deep(std::move(trajectory)),
+          std::forward<Args>(args)...});
 
-    const Trajectory::ConstProfilePtr profile_a = a_it->get_profile();
-    const Trajectory::ConstProfilePtr profile_b = b_it->get_profile();
-
-    // TODO(MXG): Consider using optional<Spline> so that we can easily keep
-    // track of which needs to be updated. There's some wasted computational
-    // cycles here whenever we are using the same spline as a previous iteration
-    spline_a = Spline(a_it);
-    spline_b = Spline(b_it);
-
-    const Time start_time =
-        std::max(spline_a.start_time(), spline_b.start_time());
-    const Time finish_time =
-        std::min(spline_a.finish_time(), spline_b.finish_time());
-
-    *motion_a = spline_a.to_fcl(start_time, finish_time);
-    *motion_b = spline_b.to_fcl(start_time, finish_time);
-
-    assert(profile_a->get_shape());
-    assert(profile_b->get_shape());
-    const auto obj_a = fcl::ContinuousCollisionObject(
-          geometry::FinalConvexShape::Implementation::get_collision(
-            *profile_a->get_shape()), motion_a);
-    const auto obj_b = fcl::ContinuousCollisionObject(
-          geometry::FinalConvexShape::Implementation::get_collision(
-            *profile_b->get_shape()), motion_b);
-
-    fcl::collide(&obj_a, &obj_b, request, result);
-    if(result.is_collide)
-    {
-      const double scaled_time = result.time_of_contact;
-      const Duration delta_t{
-        Duration::rep(scaled_time * (finish_time - start_time).count())};
-      const Time time = start_time + delta_t;
-      conflicts.emplace_back(Implementation::make_conflict(time, {a_it, b_it}));
-      if (quit_after_one)
-        return conflicts;
-    }
-
-    if(spline_a.finish_time() < spline_b.finish_time())
-    {
-      ++a_it;
-    }
-    else if(spline_b.finish_time() < spline_a.finish_time())
-    {
-      ++b_it;
-    }
-    else
-    {
-      ++a_it;
-      ++b_it;
-    }
+    return result;
   }
 
-  return conflicts;
+  template<typename... Args>
+  static Interrupt make_ref(
+      const Trajectory* const trajectory,
+      Args&& ... args)
+  {
+    Interrupt result;
+
+    result._pimpl = rmf_utils::make_impl<Implementation>(
+        Implementation{make_shallow(trajectory),
+          std::forward<Args>(args)...});
+
+    return result;
+  }
+
+};
+
+//==============================================================================
+Database::Change::Interrupt::Interrupt()
+{
+  // Do nothing
+}
+
+//==============================================================================
+auto Database::Change::make_interrupt(
+    Version original_id,
+    Trajectory interruption_trajectory,
+    Duration delay,
+    Version id) -> Change
+{
+  Change change = Implementation::make(Mode::Interrupt, id);
+  change._pimpl->interrupt = Interrupt::Implementation::make_copy(
+      std::move(interruption_trajectory), original_id, delay);
+  return change;
+}
+
+//==============================================================================
+auto Database::Change::Implementation::make_interrupt_ref(
+    const Version original_id,
+    const Trajectory* const interruption_trajectory,
+    const Duration delay,
+    const Version id) -> Change
+{
+  Change change = Implementation::make(Mode::Interrupt, id);
+  change._pimpl->interrupt = Interrupt::Implementation::make_ref(
+      interruption_trajectory, original_id, delay);
+  return change;
+}
+
+//==============================================================================
+class Database::Change::Delay::Implementation
+{
+public:
+
+  Version original_id;
+  Time from;
+  Duration delay;
+
+  template<typename... Args>
+  static Delay make(Args&& ... args)
+  {
+    Delay result;
+    result._pimpl = rmf_utils::make_impl<Implementation>(
+        Implementation{std::forward<Args>(args)...});
+    return result;
+  }
+
+};
+
+//==============================================================================
+Database::Change::Delay::Delay()
+{
+  // Do nothing
+}
+
+//==============================================================================
+auto Database::Change::make_delay(
+    Version original_id,
+    Time from,
+    Duration delay,
+    Version id) -> Change
+{
+  Change change = Implementation::make(Mode::Delay, id);
+  change._pimpl->delay = Delay::Implementation::make(
+      original_id, from, delay);
+  return change;
+}
+
+//==============================================================================
+class Database::Change::Replace::Implementation
+{
+public:
+
+  Version original_id;
+  DeepOrShallowTrajectory trajectory;
+
+  static Replace make_copy(
+      const Version original_id,
+      Trajectory trajectory)
+  {
+    Replace result;
+    result._pimpl = rmf_utils::make_impl<Implementation>(
+        Implementation{original_id, make_deep(std::move(trajectory))});
+    return result;
+  }
+
+  static Replace make_ref(
+      const Version original_id,
+      const Trajectory* const trajectory)
+  {
+    Replace result;
+    result._pimpl = rmf_utils::make_impl<Implementation>(
+        Implementation{original_id, make_shallow(trajectory)});
+    return result;
+  }
+
+};
+
+//==============================================================================
+Database::Change::Replace::Replace()
+{
+  // Do nothing
+}
+
+//==============================================================================
+auto Database::Change::make_replace(
+    const Version original_id,
+    Trajectory trajectory,
+    const Version id) -> Change
+{
+  Change change = Implementation::make(Mode::Replace, id);
+  change._pimpl->replace = Replace::Implementation::make_copy(
+      original_id, std::move(trajectory));
+  return change;
+}
+
+//==============================================================================
+auto Database::Change::Implementation::make_replace_ref(
+    const Version original_id,
+    const Trajectory* const trajectory,
+    const Version id) -> Change
+{
+  Change change = Implementation::make(Mode::Replace, id);
+  change._pimpl->replace = Replace::Implementation::make_ref(
+      original_id, trajectory);
+  return change;
+}
+
+//==============================================================================
+class Database::Change::Erase::Implementation
+{
+public:
+
+  Version original_id;
+
+  static Erase make(const Version original_id)
+  {
+    Erase result;
+    result._pimpl = rmf_utils::make_impl<Implementation>(
+        Implementation{original_id});
+    return result;
+  }
+
+};
+
+//==============================================================================
+Database::Change::Erase::Erase()
+{
+  // Do nothing
+}
+
+//==============================================================================
+auto Database::Change::make_erase(
+    const Version original_id,
+    const Version id) -> Change
+{
+  Change change = Implementation::make(Mode::Erase, id);
+  change._pimpl->erase = Erase::Implementation::make(original_id);
+  return change;
+}
+
+//==============================================================================
+class Database::Change::Cull::Implementation
+{
+public:
+
+  Time time;
+
+  static Cull make(Time time)
+  {
+    Cull result;
+    result._pimpl = rmf_utils::make_impl<Implementation>(Implementation{time});
+    return result;
+  }
+
+};
+
+//==============================================================================
+Database::Change::Cull::Cull()
+{
+  // Do nothing
+}
+
+//==============================================================================
+auto Database::Change::make_cull(
+    const Time time,
+    const Version id) -> Change
+{
+  Change change = Implementation::make(Mode::Cull, id);
+  change._pimpl->cull = Cull::Implementation::make(time);
+  return change;
+}
+
+//==============================================================================
+const Trajectory* Database::Change::Insert::trajectory() const
+{
+  return _pimpl->trajectory.get();
+}
+
+//==============================================================================
+Version Database::Change::Interrupt::original_id() const
+{
+  return _pimpl->original_id;
+}
+
+//==============================================================================
+const Trajectory* Database::Change::Interrupt::interruption() const
+{
+  return _pimpl->trajectory.get();
+}
+
+//==============================================================================
+Duration Database::Change::Interrupt::delay() const
+{
+  return _pimpl->delay;
+}
+
+//==============================================================================
+Version Database::Change::Delay::original_id() const
+{
+  return _pimpl->original_id;
+}
+
+//==============================================================================
+Time Database::Change::Delay::from() const
+{
+  return _pimpl->from;
+}
+
+//==============================================================================
+Duration Database::Change::Delay::duration() const
+{
+  return _pimpl->delay;
+}
+
+//==============================================================================
+Version Database::Change::Replace::original_id() const
+{
+  return _pimpl->original_id;
+}
+
+//==============================================================================
+const Trajectory* Database::Change::Replace::trajectory() const
+{
+  return _pimpl->trajectory.get();
+}
+
+//==============================================================================
+Version Database::Change::Erase::original_id() const
+{
+  return _pimpl->original_id;
+}
+
+//==============================================================================
+Time Database::Change::Cull::time() const
+{
+  return _pimpl->time;
+}
+
+//==============================================================================
+auto Database::Change::get_mode() const -> Mode
+{
+  return _pimpl->mode;
+}
+
+//==============================================================================
+Version Database::Change::id() const
+{
+  return _pimpl->id;
+}
+
+//==============================================================================
+auto Database::Change::insert() const -> const Insert*
+{
+  if (Mode::Insert == _pimpl->mode)
+    return &_pimpl->insert;
+
+  return nullptr;
+}
+
+//==============================================================================
+auto Database::Change::interrupt() const -> const Interrupt*
+{
+  if (Mode::Interrupt == _pimpl->mode)
+    return &_pimpl->interrupt;
+
+  return nullptr;
+}
+
+//==============================================================================
+auto Database::Change::delay() const -> const Delay*
+{
+  if (Mode::Delay == _pimpl->mode)
+    return &_pimpl->delay;
+
+  return nullptr;
+}
+
+//==============================================================================
+auto Database::Change::replace() const -> const Replace*
+{
+  if (Mode::Replace == _pimpl->mode)
+    return &_pimpl->replace;
+
+  return nullptr;
+}
+
+//==============================================================================
+auto Database::Change::erase() const -> const Erase*
+{
+  if (Mode::Erase == _pimpl->mode)
+    return &_pimpl->erase;
+
+  return nullptr;
+}
+
+//==============================================================================
+auto Database::Change::cull() const -> const Cull*
+{
+  if (Mode::Cull == _pimpl->mode)
+    return &_pimpl->cull;
+
+  return nullptr;
+}
+
+//==============================================================================
+class Database::Patch::Implementation
+{
+public:
+
+  std::vector<Change> changes;
+
+  Version latest_version;
+
+  Implementation()
+  {
+    // Do nothing
+  }
+
+  Implementation(std::vector<Change> _changes, Version _latest_version)
+  : changes(std::move(_changes)),
+    latest_version(_latest_version)
+  {
+    // Sort the changes to make sure they get applied in the correct order
+    std::sort(changes.begin(), changes.end(),
+        [](const Change& c1, const Change& c2)
+        {
+          return c1.id() < c2.id();
+        });
+  }
+
+};
+
+//==============================================================================
+class Database::Patch::IterImpl
+{
+public:
+
+  std::vector<Change>::const_iterator iter;
+
+};
+
+//==============================================================================
+Database::Patch::Patch(std::vector<Change> changes, Version latest_version)
+: _pimpl(rmf_utils::make_impl<Implementation>(
+      std::move(changes), latest_version))
+{
+  // Do nothing
+}
+
+//==============================================================================
+auto Database::Patch::begin() const -> const_iterator
+{
+  return const_iterator(IterImpl{_pimpl->changes.begin()});
+}
+
+//==============================================================================
+auto Database::Patch::end() const -> const_iterator
+{
+  return const_iterator(IterImpl{_pimpl->changes.end()});
+}
+
+//==============================================================================
+std::size_t Database::Patch::size() const
+{
+  return _pimpl->changes.size();
+}
+
+//==============================================================================
+Version Database::Patch::latest_version() const
+{
+  return _pimpl->latest_version;
+}
+
+//==============================================================================
+Database::Patch::Patch()
+{
+  // Do nothing
 }
 
 namespace internal {
+
 //==============================================================================
-bool detect_conflicts(
-    const Trajectory& trajectory,
-    const Spacetime& region,
-    std::vector<Trajectory::const_iterator>* output_iterators)
+void ChangeRelevanceInspector::version_range(VersionRange range)
 {
-#ifndef NDEBUG
-  // This should never actually happen because this function only gets used
-  // internally, and so there should be several layers of quality checks on the
-  // trajectories to prevent this. But we'll put it in here just in case.
-  if(trajectory.size() < 2)
+  versions = std::move(range);
+}
+
+//==============================================================================
+void ChangeRelevanceInspector::after(const Version* _after)
+{
+  after_version = _after;
+}
+
+//==============================================================================
+void ChangeRelevanceInspector::reserve(std::size_t size)
+{
+  relevant_changes.reserve(size);
+}
+
+//==============================================================================
+namespace {
+
+ConstEntryPtr get_last_known_ancestor(
+    ConstEntryPtr from,
+    const Version last_known_version,
+    const VersionRange& versions)
+{
+  while (from && versions.less(last_known_version, from->version))
   {
-    std::cerr << "[rmf_traffic::internal::detect_conflicts] An invalid "
-              << "trajectory was passed to detect_conflicts. This is a bug "
-              << "that should never happen. Please alert the RMF developers."
-              << std::endl;
-    throw invalid_trajectory_error::Implementation
-        ::make_segment_num_error(trajectory.size());
-  }
-#endif // NDEBUG
-
-  const Time trajectory_start_time = *trajectory.start_time();
-  const Time trajectory_finish_time = *trajectory.finish_time();
-
-  const Time start_time = region.lower_time_bound?
-        std::max(*region.lower_time_bound, trajectory_start_time)
-      : trajectory_start_time;
-
-  const Time finish_time = region.upper_time_bound?
-        std::min(*region.upper_time_bound, trajectory_finish_time)
-      : trajectory_finish_time;
-
-  if(finish_time < start_time)
-  {
-    // If the trajectory or region finishes before the other has started, that
-    // means there is no overlap in time between the region and the trajectory,
-    // so it is impossible for them to conflict.
-    return false;
+    from = from->succeeds;
   }
 
-  const Trajectory::const_iterator begin_it =
-      trajectory_start_time < start_time?
-        trajectory.find(start_time) : ++trajectory.begin();
+  return from;
+}
 
-  const Trajectory::const_iterator end_it =
-      finish_time < trajectory_finish_time?
-        ++trajectory.find(finish_time) : trajectory.end();
+} // anonymous namespace
 
-  std::shared_ptr<fcl::SplineMotion> motion_trajectory =
-      make_uninitialized_fcl_spline_motion();
-  std::shared_ptr<internal::StaticMotion> motion_region =
-      std::make_shared<internal::StaticMotion>(region.pose);
+//==============================================================================
+void ChangeRelevanceInspector::inspect(
+    const ConstEntryPtr& entry,
+    const std::function<bool(const ConstEntryPtr&)>& relevant)
+{
+  if (entry->succeeded_by)
+    return;
 
-  const fcl::ContinuousCollisionRequest request = make_fcl_request();
+  if (after_version && versions.less_or_equal(entry->version, *after_version))
+    return;
 
-  bool collision_detected = false;
+  const bool needed = relevant(entry);
 
-  for(auto it = begin_it; it != end_it; ++it)
+  if (needed)
   {
-    const Trajectory::ConstProfilePtr profile = it->get_profile();
-
-    Spline spline_trajectory{it};
-
-    const Time spline_start_time =
-        std::max(spline_trajectory.start_time(), start_time);
-    const Time spline_finish_time =
-        std::min(spline_trajectory.finish_time(), finish_time);
-
-    *motion_trajectory = spline_trajectory.to_fcl(
-          spline_start_time, spline_finish_time);
-
-    assert(profile->get_shape());
-    const auto obj_trajectory = fcl::ContinuousCollisionObject(
-          geometry::FinalConvexShape::Implementation::get_collision(
-            *profile->get_shape()), motion_trajectory);
-
-    assert(region.shape);
-    const auto& region_shapes = geometry::FinalShape::Implementation
-        ::get_collisions(*region.shape);
-    for(const auto& region_shape : region_shapes)
+    // Check if this entry descends from an entry that the remote mirror does
+    // not know about.
+    ConstEntryPtr record_changes_from = nullptr;
+    if (after_version)
     {
-      const auto obj_region = fcl::ContinuousCollisionObject(
-            region_shape, motion_region);
+      const ConstEntryPtr check =
+          get_last_known_ancestor(entry, *after_version, versions);
 
-      fcl::ContinuousCollisionResult result;
-      fcl::collide(&obj_trajectory, &obj_region, request, result);
-      if(result.is_collide)
+      if (check)
       {
-        if(output_iterators)
+        if (relevant(check))
         {
-          output_iterators->push_back(it);
-          collision_detected = true;
+          // The remote mirror already knows the lineage of this entry, so we
+          // will transmit all of its changes from the last version that the
+          // mirror knew about.
+          record_changes_from = check;
         }
         else
         {
-          return true;
+          // The remote mirror does not know the lineage of this entry, so we
+          // will simply transmit the current entry as an insertion. We simply
+          // leave record_changes_from as a nullptr.
         }
+      }
+      else
+      {
+        // The remote mirror does not know the lineage of this entry, so we
+        // will simply transmit the current entry as an insertion. We simply
+        // leave record_changes_from as a nullptr.
+      }
+    }
+
+    if (record_changes_from)
+    {
+      // TODO(MXG): We can improve bandwidth usage a bit if we check whether a
+      // Replace operation has taken place since the last known ancestor. If
+      // that is the case, then we can skip recording all of the changes and
+      // just use a single replace from the old version number to the current
+      // version of the trajectory.
+      ConstEntryPtr record = record_changes_from->succeeded_by;
+      while (record)
+      {
+        relevant_changes.emplace_back(*record->change);
+        record = record->succeeded_by;
+      }
+    }
+    else
+    {
+      // We are not transmitting the chain of changes that led to this entry,
+      // so just create an insertion for it and transmit that.
+      relevant_changes.emplace_back(
+          Database::Change::Implementation::make_insert_ref(
+          &entry->trajectory, entry->version));
+    }
+  }
+  else if (after_version)
+  {
+    // Figure out if this trajectory needs to be erased
+    const ConstEntryPtr check =
+        get_last_known_ancestor(entry, *after_version, versions);
+
+    if (check)
+    {
+      if (relevant(check))
+      {
+        // This trajectory is no longer relevant to the remote mirror, so we
+        // will tell the remote mirror to erase it rather than continuing to
+        // transmit its change history. If a later version of this trajectory
+        // becomes relevant again, we will tell it to insert it at that time.
+        relevant_changes.emplace_back(
+            Database::Change::make_erase(check->version, entry->version));
       }
     }
   }
-
-  return collision_detected;
+  else
+  {
+    // The remote mirror never knew about the lineage of this entry, so there's
+    // no need to transmit any information about it at all.
+  }
 }
+
+//==============================================================================
+void ChangeRelevanceInspector::inspect(
+    const ConstEntryPtr& entry,
+    const rmf_traffic::internal::Spacetime& spacetime)
+{
+  inspect(entry, [&](const ConstEntryPtr& e) -> bool
+      {
+        const Trajectory& trajectory = e->trajectory;
+        if (trajectory.start_time())
+        {
+          return rmf_traffic::internal::detect_conflicts(
+          e->trajectory, spacetime, nullptr);
+        }
+        else
+        {
+          assert(e->change->get_mode() == Database::Change::Mode::Erase);
+          return false;
+        }
+      });
+}
+
+//==============================================================================
+void ChangeRelevanceInspector::inspect(
+    const ConstEntryPtr& entry,
+    const Time* const lower_time_bound,
+    const Time* const upper_time_bound)
+{
+  inspect(entry, [&](const ConstEntryPtr& e) -> bool
+      {
+        const Trajectory& trajectory = e->trajectory;
+        if (trajectory.start_time())
+        {
+          if (lower_time_bound && *trajectory.finish_time() < *lower_time_bound)
+            return false;
+
+          if (upper_time_bound && *upper_time_bound < *trajectory.start_time())
+            return false;
+
+          return true;
+        }
+        else
+        {
+          assert(e->change->get_mode() == Database::Change::Mode::Erase);
+          return false;
+        }
+      });
+}
+
 } // namespace internal
 
+//==============================================================================
+Database::Database()
+{
+  // Do nothing
+}
+
+//==============================================================================
+auto Database::changes(const Query& parameters) const -> Patch
+{
+  auto relevant_changes = _pimpl->inspect<internal::ChangeRelevanceInspector>(
+      parameters).relevant_changes;
+
+  if (_pimpl->cull_has_occurred)
+  {
+    const auto* after = parameters.versions().after();
+    const auto& last_cull = _pimpl->last_cull;
+    if (after)
+    {
+      const auto range = internal::VersionRange(_pimpl->oldest_version);
+      if (range.less(after->get_version(), last_cull.first))
+      {
+        relevant_changes.push_back(
+            Change::make_cull(last_cull.second, last_cull.first));
+      }
+    }
+    else
+    {
+      relevant_changes.push_back(
+          Change::make_cull(last_cull.second, last_cull.first));
+    }
+  }
+
+  return Patch(relevant_changes, latest_version());
+}
+
+//==============================================================================
+Version Database::insert(Trajectory trajectory)
+{
+  internal::EntryPtr new_entry =
+      std::make_shared<internal::Entry>(
+      std::move(trajectory),
+      ++_pimpl->latest_version);
+
+  new_entry->change = std::make_unique<Change>(
+      Change::Implementation::make_insert_ref(
+      &new_entry->trajectory, new_entry->version));
+
+  _pimpl->add_entry(new_entry);
+
+  return new_entry->version;
+}
+
+//==============================================================================
+Version Database::interrupt(
+    Version id,
+    Trajectory interruption_trajectory,
+    Duration delay)
+{
+  const internal::EntryPtr old_entry =
+      _pimpl->get_entry_iterator(id, "interruption")->second;
+
+  Trajectory new_trajectory = add_interruption(
+      old_entry->trajectory, interruption_trajectory, delay);
+
+  const Version new_version = ++_pimpl->latest_version;
+  Change change = Database::Change::make_interrupt(
+      id, std::move(interruption_trajectory), delay, new_version);
+
+  old_entry->succeeded_by = _pimpl->add_entry(
+      std::make_shared<internal::Entry>(
+      std::move(new_trajectory),
+      new_version,
+      old_entry,
+      std::make_unique<Change>(std::move(change))));
+
+  return new_version;
+}
+
+//==============================================================================
+Version Database::delay(
+    const Version id,
+    const Time from,
+    const Duration delay)
+{
+  const internal::EntryPtr old_entry =
+      _pimpl->get_entry_iterator(id, "delay")->second;
+
+  Trajectory new_trajectory = add_delay(
+      old_entry->trajectory, from, delay);
+
+  const Version new_version = ++_pimpl->latest_version;
+  Change change = Database::Change::make_delay(id, from, delay, new_version);
+
+  old_entry->succeeded_by = _pimpl->add_entry(
+      std::make_shared<internal::Entry>(
+      std::move(new_trajectory),
+      new_version,
+      old_entry,
+      std::make_unique<Change>(std::move(change))));
+
+  return new_version;
+}
+
+//==============================================================================
+Version Database::replace(
+    Version previous_id,
+    Trajectory trajectory)
+{
+  const internal::EntryPtr old_entry =
+      _pimpl->get_entry_iterator(previous_id, "replacement")->second;
+
+  const Version new_version = ++_pimpl->latest_version;
+  internal::EntryPtr new_entry =
+      std::make_shared<internal::Entry>(
+      std::move(trajectory),
+      new_version,
+      old_entry);
+
+  new_entry->change = std::make_unique<Change>(
+      Change::Implementation::make_replace_ref(
+      previous_id, &new_entry->trajectory, new_version));
+
+  old_entry->succeeded_by = _pimpl->add_entry(new_entry);
+
+  return new_version;
+}
+
+//==============================================================================
+Version Database::erase(Version id)
+{
+  const internal::EntryPtr old_entry =
+      _pimpl->get_entry_iterator(id, "erasure")->second;
+
+  const Version new_version = ++_pimpl->latest_version;
+
+  old_entry->succeeded_by = _pimpl->add_entry(
+      std::make_shared<internal::Entry>(
+      Trajectory{old_entry->trajectory.get_map_name()},
+      new_version,
+      old_entry,
+      std::make_unique<Change>(Change::make_erase(id, new_version))), true);
+
+  return new_version;
+}
+
+//==============================================================================
+Version Database::cull(Time time)
+{
+  _pimpl->cull(++_pimpl->latest_version, time);
+
+  return _pimpl->latest_version;
+}
+
+} // namespace schedule
+
+namespace detail {
+
+template class bidirectional_iterator<
+    const schedule::Database::Change,
+    schedule::Database::Patch::IterImpl,
+    schedule::Database::Patch
+>;
+
+} // namespace detail
+
 } // namespace rmf_traffic
+
