@@ -764,20 +764,21 @@ void ChangeRelevanceInspector::inspect(
     const ConstEntryPtr& entry,
     const rmf_traffic::internal::Spacetime& spacetime)
 {
-  inspect(entry, [&](const ConstEntryPtr& e) -> bool
-      {
-        const Trajectory& trajectory = e->trajectory;
-        if (trajectory.start_time())
-        {
-          return rmf_traffic::internal::detect_conflicts(
-          e->trajectory, spacetime, nullptr);
-        }
-        else
-        {
-          assert(e->change->get_mode() == Database::Change::Mode::Erase);
-          return false;
-        }
-      });
+  inspect(entry,
+  [&](const ConstEntryPtr& e) -> bool
+  {
+    const Trajectory& trajectory = e->trajectory;
+    if(trajectory.start_time())
+    {
+      return rmf_traffic::internal::detect_conflicts(
+            e->trajectory, spacetime, nullptr);
+    }
+    else
+    {
+      assert(e->change->get_mode() == Database::Change::Mode::Erase);
+      return false;
+    }
+  });
 }
 
 //==============================================================================
