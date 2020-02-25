@@ -766,7 +766,7 @@ void ChangeRelevanceInspector::inspect(
 {
   inspect(entry, 
   [&](const ConstEntryPtr& e) -> bool
-   {
+  {
         const Trajectory& trajectory = e->trajectory;
         if (trajectory.start_time())
         {
