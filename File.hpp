@@ -15,274 +15,691 @@
  *
 */
 
-#include <rmf_traffic/agv/VehicleTraits.hpp>
+#include <rmf_traffic/agv/Planner.hpp>
+
+#include "internal_Planner.hpp"
+#include "internal_planning.hpp"
 
 namespace rmf_traffic {
 namespace agv {
 
 //==============================================================================
-class VehicleTraits::Limits::Implementation
+class Planner::Configuration::Implementation
 {
 public:
 
-  double velocity;
-
-  double acceleration;
+  Graph graph;
+  VehicleTraits traits;
+  Interpolate::Options interpolation;
 
 };
 
 //==============================================================================
-class VehicleTraits::Implementation
+Planner::Configuration::Configuration(
+    Graph graph,
+    VehicleTraits traits,
+    Interpolate::Options interpolation)
+  : _pimpl(rmf_utils::make_impl<Implementation>(
+             Implementation{
+               std::move(graph),
+               std::move(traits),
+               std::move(interpolation)
+             }))
+{
+  // Do nothing
+}
+
+//==============================================================================
+auto Planner::Configuration::graph(Graph graph) -> Configuration&
+{
+  _pimpl->graph = std::move(graph);
+  return *this;
+}
+
+//==============================================================================
+Graph& Planner::Configuration::graph()
+{
+  return _pimpl->graph;
+}
+
+//==============================================================================
+const Graph& Planner::Configuration::graph() const
+{
+  return _pimpl->graph;
+}
+
+//==============================================================================
+auto Planner::Configuration::vehicle_traits(VehicleTraits traits)
+-> Configuration&
+{
+  _pimpl->traits = std::move(traits);
+  return *this;
+}
+
+//==============================================================================
+VehicleTraits& Planner::Configuration::vehicle_traits()
+{
+  return _pimpl->traits;
+}
+
+//==============================================================================
+const VehicleTraits& Planner::Configuration::vehicle_traits() const
+{
+  return _pimpl->traits;
+}
+
+//==============================================================================
+auto Planner::Configuration::interpolation(Interpolate::Options interpolate)
+-> Configuration&
+{
+  _pimpl->interpolation = std::move(interpolate);
+  return *this;
+}
+
+//==============================================================================
+Interpolate::Options& Planner::Configuration::interpolation()
+{
+  return _pimpl->interpolation;
+}
+
+//==============================================================================
+const Interpolate::Options& Planner::Configuration::interpolation() const
+{
+  return _pimpl->interpolation;
+}
+
+//==============================================================================
+class Planner::Options::Implementation
 {
 public:
 
-  Limits _linear;
+  const schedule::Viewer* viewer;
+  Duration min_hold_time;
+  const bool* interrupt_flag;
+  std::unordered_set<schedule::Version> ignore_schedule_ids;
 
-  Limits _rotation;
+};
 
-  Trajectory::ConstProfilePtr _profile;
+//==============================================================================
+Planner::Options::Options(
+    const schedule::Viewer& viewer,
+    const Duration min_hold_time,
+    const bool* interrupt_flag,
+    std::unordered_set<schedule::Version> ignore_ids)
+  : _pimpl(rmf_utils::make_impl<Implementation>(
+             Implementation{
+               &viewer,
+               min_hold_time,
+               interrupt_flag,
+               std::move(ignore_ids)
+             }))
+{
+  // Do nothing
+}
 
-  Steering _steering_mode;
-  Differential _differential;
-  Holonomic _holonomic;
+//==============================================================================
+auto Planner::Options::schedule_viewer(const schedule::Viewer& viewer)
+-> Options&
+{
+  _pimpl->viewer = &viewer;
+  return *this;
+}
 
-  Implementation(
-      Limits linear,
-      Limits rotation,
-      Trajectory::ConstProfilePtr profile,
-      Differential differential)
-  : _linear(std::move(linear)),
-    _rotation(std::move(rotation)),
-    _profile(std::move(profile)),
-    _steering_mode(Steering::Differential),
-    _differential(differential)
+//==============================================================================
+const schedule::Viewer& Planner::Options::schedule_viewer() const
+{
+  return *_pimpl->viewer;
+}
+
+//==============================================================================
+auto Planner::Options::minimum_holding_time(const Duration holding_time)
+-> Options&
+{
+  _pimpl->min_hold_time = holding_time;
+  return *this;
+}
+
+//==============================================================================
+Duration Planner::Options::minimum_holding_time() const
+{
+  return _pimpl->min_hold_time;
+}
+
+//==============================================================================
+auto Planner::Options::interrupt_flag(const bool* flag) -> Options&
+{
+  _pimpl->interrupt_flag = flag;
+  return *this;
+}
+
+//==============================================================================
+const bool* Planner::Options::interrupt_flag() const
+{
+  return _pimpl->interrupt_flag;
+}
+
+//==============================================================================
+auto Planner::Options::ignore_schedule_ids(
+    std::unordered_set<schedule::Version> ignore_ids) -> Options&
+{
+  _pimpl->ignore_schedule_ids = std::move(ignore_ids);
+  return *this;
+}
+
+//==============================================================================
+std::unordered_set<schedule::Version> Planner::Options
+::ignore_schedule_ids() const
+{
+  return _pimpl->ignore_schedule_ids;
+}
+
+//==============================================================================
+class Planner::Start::Implementation
+{
+public:
+
+  Time time;
+  std::size_t waypoint;
+  double orientation;
+  rmf_utils::optional<Eigen::Vector2d> location;
+  rmf_utils::optional<std::size_t> lane;
+
+};
+
+//==============================================================================
+Planner::Start::Start(
+    const Time initial_time,
+    const std::size_t initial_waypoint,
+    const double initial_orientation,
+    rmf_utils::optional<Eigen::Vector2d> initial_location,
+    rmf_utils::optional<std::size_t> initial_lane)
+  : _pimpl(rmf_utils::make_impl<Implementation>(
+             Implementation{
+               initial_time,
+               initial_waypoint,
+               initial_orientation,
+               std::move(initial_location),
+               initial_lane
+             }))
+{
+  // Do nothing
+}
+
+//==============================================================================
+auto Planner::Start::time(const Time initial_time) -> Start&
+{
+  _pimpl->time = initial_time;
+  return *this;
+}
+
+//==============================================================================
+Time Planner::Start::time() const
+{
+  return _pimpl->time;
+}
+
+//==============================================================================
+auto Planner::Start::waypoint(const std::size_t initial_waypoint) -> Start&
+{
+  _pimpl->waypoint = initial_waypoint;
+  return *this;
+}
+
+//==============================================================================
+std::size_t Planner::Start::waypoint() const
+{
+  return _pimpl->waypoint;
+}
+
+//==============================================================================
+auto Planner::Start::orientation(const double initial_orientation) -> Start&
+{
+  _pimpl->orientation = initial_orientation;
+  return *this;
+}
+
+//==============================================================================
+double Planner::Start::orientation() const
+{
+  return _pimpl->orientation;
+}
+
+//==============================================================================
+rmf_utils::optional<Eigen::Vector2d> Planner::Start::location() const
+{
+  return _pimpl->location;
+}
+
+//==============================================================================
+auto Planner::Start::location(
+    rmf_utils::optional<Eigen::Vector2d> initial_location) -> Start&
+{
+  _pimpl->location = std::move(initial_location);
+  return *this;
+}
+
+//==============================================================================
+rmf_utils::optional<std::size_t> Planner::Start::lane() const
+{
+  return _pimpl->lane;
+}
+
+//==============================================================================
+auto Planner::Start::lane(
+    rmf_utils::optional<std::size_t> initial_lane) -> Start&
+{
+  _pimpl->lane = initial_lane;
+  return *this;
+}
+
+//==============================================================================
+class Planner::Goal::Implementation
+{
+public:
+
+  std::size_t waypoint;
+
+  rmf_utils::optional<double> orientation;
+
+};
+
+//==============================================================================
+Planner::Goal::Goal(const std::size_t waypoint)
+  : _pimpl(rmf_utils::make_impl<Implementation>(
+             Implementation{
+               waypoint,
+               rmf_utils::nullopt
+             }))
+{
+  // Do nothing
+}
+
+//==============================================================================
+Planner::Goal::Goal(
+    const std::size_t waypoint,
+    const double goal_orientation)
+  : _pimpl(rmf_utils::make_impl<Implementation>(
+             Implementation{
+               waypoint,
+               goal_orientation
+             }))
+{
+  // Do nothing
+}
+
+//==============================================================================
+auto Planner::Goal::waypoint(const std::size_t goal_waypoint) -> Goal&
+{
+  _pimpl->waypoint = goal_waypoint;
+  return *this;
+}
+
+//==============================================================================
+std::size_t Planner::Goal::waypoint() const
+{
+  return _pimpl->waypoint;
+}
+
+//==============================================================================
+auto Planner::Goal::orientation(const double goal_orientation) -> Goal&
+{
+  _pimpl->orientation = goal_orientation;
+  return *this;
+}
+
+//==============================================================================
+auto Planner::Goal::any_orientation() -> Goal&
+{
+  _pimpl->orientation = rmf_utils::nullopt;
+  return *this;
+}
+
+//==============================================================================
+const double* Planner::Goal::orientation() const
+{
+  if(_pimpl->orientation)
+    return &(*_pimpl->orientation);
+
+  return nullptr;
+}
+
+//==============================================================================
+class Planner::Implementation
+{
+public:
+
+  internal::planning::CacheManager cache_mgr;
+
+  Options default_options;
+
+  Configuration configuration;
+
+};
+
+//==============================================================================
+class Plan::Implementation
+{
+public:
+
+  internal::planning::Result result;
+
+  internal::planning::CacheManager cache_mgr;
+
+
+  static rmf_utils::optional<Plan> generate(
+      internal::planning::CacheManager cache_mgr,
+      const std::vector<Planner::Start>& starts,
+      Planner::Goal goal,
+      Planner::Options options)
   {
-    // Do nothing
+    auto result = cache_mgr.get().plan(
+        {starts}, std::move(goal), std::move(options));
+
+    if (!result)
+      return rmf_utils::nullopt;
+
+    Plan plan;
+    plan._pimpl = rmf_utils::make_impl<Implementation>(
+          Implementation{std::move(*result), std::move(cache_mgr)});
+
+    return std::move(plan);
   }
-};
-
-//==============================================================================
-VehicleTraits::Limits::Limits(const double velocity, const double acceleration)
-: _pimpl(rmf_utils::make_impl<Implementation>(
-      Implementation{velocity, acceleration}))
-{
-  // Do nothing
-}
-
-//==============================================================================
-auto VehicleTraits::Limits::set_nominal_velocity(double nom_vel) -> Limits&
-{
-  _pimpl->velocity = nom_vel;
-  return *this;
-}
-
-//==============================================================================
-double VehicleTraits::Limits::get_nominal_velocity() const
-{
-  return _pimpl->velocity;
-}
-
-//==============================================================================
-auto VehicleTraits::Limits::set_nominal_acceleration(double nom_accel)
-  -> Limits&
-{
-  _pimpl->acceleration = nom_accel;
-  return *this;
-}
-
-//==============================================================================
-double VehicleTraits::Limits::get_nominal_acceleration() const
-{
-  return _pimpl->acceleration;
-}
-
-//==============================================================================
-bool VehicleTraits::Limits::valid() const
-{
-  return _pimpl->velocity > 0.0 && _pimpl->acceleration > 0.0;
-}
-
-//==============================================================================
-class VehicleTraits::Differential::Implementation
-{
-public:
-
-  Eigen::Vector2d forward;
-  bool reversible;
 
 };
 
 //==============================================================================
-VehicleTraits::Differential::Differential(
-    Eigen::Vector2d forward,
-    const bool reversible)
-: _pimpl(rmf_utils::make_impl<Implementation>(
-      Implementation{std::move(forward), reversible}))
+Planner::Planner(
+    Configuration config,
+    Options default_options)
+  : _pimpl(rmf_utils::make_impl<Implementation>(
+             Implementation{
+               internal::planning::make_cache(config),
+               std::move(default_options),
+               config
+             }))
 {
   // Do nothing
 }
 
 //==============================================================================
-auto VehicleTraits::Differential::set_forward(Eigen::Vector2d forward)
-  -> Differential&
+auto Planner::get_configuration() const -> const Configuration&
 {
-  _pimpl->forward = std::move(forward);
+  return _pimpl->configuration;
+}
+
+//==============================================================================
+Planner& Planner::set_default_options(Options default_options)
+{
+  _pimpl->default_options = std::move(default_options);
   return *this;
 }
 
 //==============================================================================
-const Eigen::Vector2d& VehicleTraits::Differential::get_forward() const
+auto Planner::get_default_options() -> Options&
 {
-  return _pimpl->forward;
+  return _pimpl->default_options;
 }
 
 //==============================================================================
-auto VehicleTraits::Differential::set_reversible(bool reversible)
-  -> Differential&
+auto Planner::get_default_options() const -> const Options&
 {
-  _pimpl->reversible = reversible;
-  return *this;
+  return _pimpl->default_options;
 }
 
 //==============================================================================
-bool VehicleTraits::Differential::is_reversible() const
+rmf_utils::optional<Plan> Planner::plan(const Start& start, Goal goal) const
 {
-  return _pimpl->reversible;
+  return Plan::Implementation::generate(
+        _pimpl->cache_mgr,
+        {start},
+        std::move(goal),
+        _pimpl->default_options);
 }
 
 //==============================================================================
-bool VehicleTraits::Differential::valid() const
+rmf_utils::optional<Plan> Planner::plan(
+    const Start& start,
+    Goal goal,
+    Options options) const
 {
-  return _pimpl->forward.norm() > 1e-6;
+  return Plan::Implementation::generate(
+        _pimpl->cache_mgr,
+        {start},
+        std::move(goal),
+        std::move(options));
 }
 
 //==============================================================================
-VehicleTraits::Holonomic::Holonomic()
+rmf_utils::optional<Plan> Planner::plan(const StartSet& starts, Goal goal) const
 {
-  // Do nothing. No need to instantiate _pimpl because it's not being used (yet)
+  return Plan::Implementation::generate(
+        _pimpl->cache_mgr,
+        starts,
+        std::move(goal),
+        _pimpl->default_options);
 }
 
 //==============================================================================
-VehicleTraits::VehicleTraits(
-    Limits linear,
-    Limits rotational,
-    Trajectory::ConstProfilePtr profile,
-    Differential steering)
-: _pimpl(rmf_utils::make_impl<Implementation>(
-      std::move(linear), std::move(rotational),
-      std::move(profile), std::move(steering)))
+rmf_utils::optional<Plan> Planner::plan(
+    const StartSet& starts,
+    Goal goal,
+    Options options) const
+{
+  return Plan::Implementation::generate(
+        _pimpl->cache_mgr,
+        starts,
+        std::move(goal),
+        std::move(options));
+}
+
+//==============================================================================
+const Eigen::Vector3d& Plan::Waypoint::position() const
+{
+  return _pimpl->position;
+}
+
+//==============================================================================
+rmf_traffic::Time Plan::Waypoint::time() const
+{
+  return _pimpl->time;
+}
+
+//==============================================================================
+rmf_utils::optional<std::size_t> Plan::Waypoint::graph_index() const
+{
+  return _pimpl->graph_index;
+}
+
+//==============================================================================
+const Graph::Lane::Event* Plan::Waypoint::event() const
+{
+  return _pimpl->event.get();
+}
+
+//==============================================================================
+Plan::Waypoint::Waypoint()
 {
   // Do nothing
 }
 
 //==============================================================================
-VehicleTraits::Limits& VehicleTraits::linear()
+const std::vector<Trajectory>& Plan::get_trajectories() const
 {
-  return _pimpl->_linear;
+  return _pimpl->result.trajectories;
 }
 
 //==============================================================================
-const VehicleTraits::Limits& VehicleTraits::linear() const
+const std::vector<Plan::Waypoint>& Plan::get_waypoints() const
 {
-  return _pimpl->_linear;
+  return _pimpl->result.waypoints;
 }
 
 //==============================================================================
-VehicleTraits::Limits& VehicleTraits::rotational()
+rmf_utils::optional<Plan> Plan::replan(const Start& new_start) const
 {
-  return _pimpl->_rotation;
+  return Plan::Implementation::generate(
+        _pimpl->cache_mgr,
+        {new_start},
+        _pimpl->result.goal,
+        _pimpl->result.options);
 }
 
 //==============================================================================
-const VehicleTraits::Limits& VehicleTraits::rotational() const
+rmf_utils::optional<Plan> Plan::replan(
+    const Planner::Start& new_start,
+    Planner::Options new_options) const
 {
-  return _pimpl->_rotation;
+  return Plan::Implementation::generate(
+        _pimpl->cache_mgr,
+        {new_start},
+        _pimpl->result.goal,
+        std::move(new_options));
 }
 
 //==============================================================================
-auto VehicleTraits::set_profile(Trajectory::ConstProfilePtr profile)
-  -> VehicleTraits&
+rmf_utils::optional<Plan> Plan::replan(const StartSet& new_starts) const
 {
-  _pimpl->_profile = std::move(profile);
-  return *this;
+  return Plan::Implementation::generate(
+        _pimpl->cache_mgr,
+        new_starts,
+        _pimpl->result.goal,
+        _pimpl->result.options);
 }
 
 //==============================================================================
-const Trajectory::ConstProfilePtr& VehicleTraits::get_profile() const
+rmf_utils::optional<Plan> Plan::replan(
+    const StartSet& new_starts,
+    Options new_options) const
 {
-  return _pimpl->_profile;
+  return Plan::Implementation::generate(
+        _pimpl->cache_mgr,
+        new_starts,
+        _pimpl->result.goal,
+        std::move(new_options));
 }
 
 //==============================================================================
-VehicleTraits::Steering VehicleTraits::get_steering() const
+const Planner::Start& Plan::get_start() const
 {
-  return _pimpl->_steering_mode;
+  return _pimpl->result.start;
 }
 
 //==============================================================================
-auto VehicleTraits::set_differential(Differential parameters) -> Differential&
+const Planner::Goal& Plan::get_goal() const
 {
-  _pimpl->_steering_mode = Steering::Differential;
-  _pimpl->_differential = std::move(parameters);
-  return _pimpl->_differential;
+  return _pimpl->result.goal;
 }
 
 //==============================================================================
-auto VehicleTraits::get_differential() -> Differential*
+const Planner::Options& Plan::get_options() const
 {
-  if (_pimpl->_steering_mode == Steering::Differential)
-    return &_pimpl->_differential;
-
-  return nullptr;
+  return _pimpl->result.options;
 }
 
 //==============================================================================
-auto VehicleTraits::get_differential() const -> const Differential*
+const Planner::Configuration& Plan::get_configuration() const
 {
-  if (_pimpl->_steering_mode == Steering::Differential)
-    return &_pimpl->_differential;
-
-  return nullptr;
+  return _pimpl->cache_mgr.get_configuration();
 }
 
 //==============================================================================
-auto VehicleTraits::set_holonomic(Holonomic parameters) -> Holonomic&
+
+std::vector<Plan::Start> compute_plan_starts(
+    const rmf_traffic::agv::Graph& graph,
+    const Eigen::Vector3d pose,
+    const rmf_traffic::Time start_time,
+    const double max_merge_waypoint_distance,
+    const double max_merge_lane_distance,
+    const double min_lane_length)
 {
-  _pimpl->_steering_mode = Steering::Holonomic;
-  _pimpl->_holonomic = std::move(parameters);
-  return _pimpl->_holonomic;
-}
+  const Eigen::Vector2d p_location = {pose[0], pose[1]};
+  const double start_yaw = pose[2];
 
-//==============================================================================
-auto VehicleTraits::get_holonomic() -> Holonomic*
-{
-  if (_pimpl->_steering_mode == Steering::Holonomic)
-    return &_pimpl->_holonomic;
+  // If there are waypoints which are very close, take that as the only Start
+  for (std::size_t i=0; i < graph.num_waypoints() ; ++i)
+  {
+    const auto& wp = graph.get_waypoint(i);
+    const Eigen::Vector2d wp_location = wp.get_location();
 
-  return nullptr;
-}
+    if ( (p_location - wp_location).norm() < max_merge_waypoint_distance)
+    {
+      return {Plan::Start(start_time, wp.index(), start_yaw)};
+    }
+  }
 
-//==============================================================================
-auto VehicleTraits::get_holonomic() const -> const Holonomic*
-{
-  if (_pimpl->_steering_mode == Steering::Holonomic)
-    return &_pimpl->_holonomic;
+  // Iterate through the lanes and return the set of possible waypoints, i.e.
+  // entries and exits of nearby lanes.
+  std::vector<Plan::Start> starts;
+  std::unordered_set<std::size_t> raw_starts;
 
-  return nullptr;
-}
+  for (std::size_t i=0; i < graph.num_lanes(); ++i)
+  {
+    const auto& lane = graph.get_lane(i);
+    const Eigen::Vector2d p0 = 
+        graph.get_waypoint(lane.entry().waypoint_index()).get_location();
+    const Eigen::Vector2d p1 =
+        graph.get_waypoint(lane.exit().waypoint_index()).get_location();
+    
+    const double lane_length = (p1 - p0).norm();
 
-//==============================================================================
-bool VehicleTraits::valid() const
-{
-  const bool steering_valid = [&]() -> bool
+    // This "lane" is effectively a single point, so we'll skip it
+    if (lane_length < min_lane_length)
+      continue;
+
+    const Eigen::Vector2d pn = (p1 - p0) / lane_length;
+    const Eigen::Vector2d p_l = p_location - p0;
+    const double p_l_projection = p_l.dot(pn);
+
+    // If it's negative then its closest point on the lane is the entry point
+    if (p_l_projection < 0.0)
+    {
+      const double dist_to_entry = p_l.norm();
+      const std::size_t entry_waypoint_index = lane.entry().waypoint_index();
+
+      if (dist_to_entry < max_merge_lane_distance)
       {
-        if (_pimpl->_steering_mode == Steering::Differential)
-          return get_differential()->valid();
+        if (!raw_starts.insert(entry_waypoint_index).second)
+          continue;
 
-        return true;
-      } ();
+        starts.emplace_back(
+            Plan::Start(
+                start_time, entry_waypoint_index, start_yaw, p_location));
+      }
+    }
+    // If it's larger than the lane length, then its closest point on the lane
+    // is the exit point.
+    else if (lane_length < p_l_projection)
+    {
+      const double dist_to_exit = (p_location - p1).norm();
+      const std::size_t exit_waypoint_index = lane.exit().waypoint_index();
 
-  return linear().valid() && rotational().valid() && steering_valid;
+      if (dist_to_exit < max_merge_lane_distance)
+      {
+        if (!raw_starts.insert(exit_waypoint_index).second)
+          continue;
+
+        starts.emplace_back(
+            Plan::Start(
+                start_time, exit_waypoint_index, start_yaw, p_location));
+      }
+    }
+    // If its between the entry and the exit waypoints, then we should
+    // compute it's distance away from the lane line.
+    else
+    {
+      const double lane_dist = (p_l - p_l_projection*pn).norm();
+      const std::size_t exit_waypoint_index = lane.exit().waypoint_index();
+
+      if (lane_dist < max_merge_lane_distance)
+      {
+        starts.emplace_back(
+            Plan::Start(
+                start_time, exit_waypoint_index, start_yaw, p_location, i));
+      }
+    }
+  }
+
+  return starts;
 }
 
 } // namespace agv
