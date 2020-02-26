@@ -15,693 +15,614 @@
  *
 */
 
-#include <rmf_traffic/agv/Planner.hpp>
+#include "geometry/ShapeInternal.hpp"
+#include "DetectConflictInternal.hpp"
+#include "Spline.hpp"
+#include "StaticMotion.hpp"
 
-#include "internal_Planner.hpp"
-#include "internal_planning.hpp"
+#include <rmf_traffic/Conflict.hpp>
+
+#include <fcl/continuous_collision.h>
+#include <fcl/ccd/motion.h>
+
+#include <unordered_map>
 
 namespace rmf_traffic {
-namespace agv {
 
 //==============================================================================
-class Planner::Configuration::Implementation
-{
-public:
-
-  Graph graph;
-  VehicleTraits traits;
-  Interpolate::Options interpolation;
-
-};
-
-//==============================================================================
-Planner::Configuration::Configuration(
-    Graph graph,
-    VehicleTraits traits,
-    Interpolate::Options interpolation)
-  : _pimpl(rmf_utils::make_impl<Implementation>(
-             Implementation{
-               std::move(graph),
-               std::move(traits),
-               std::move(interpolation)
-             }))
-{
-  // Do nothing
-}
-
-//==============================================================================
-auto Planner::Configuration::graph(Graph graph) -> Configuration&
-{
-  _pimpl->graph = std::move(graph);
-  return *this;
-}
-
-//==============================================================================
-Graph& Planner::Configuration::graph()
-{
-  return _pimpl->graph;
-}
-
-//==============================================================================
-const Graph& Planner::Configuration::graph() const
-{
-  return _pimpl->graph;
-}
-
-//==============================================================================
-auto Planner::Configuration::vehicle_traits(VehicleTraits traits)
--> Configuration&
-{
-  _pimpl->traits = std::move(traits);
-  return *this;
-}
-
-//==============================================================================
-VehicleTraits& Planner::Configuration::vehicle_traits()
-{
-  return _pimpl->traits;
-}
-
-//==============================================================================
-const VehicleTraits& Planner::Configuration::vehicle_traits() const
-{
-  return _pimpl->traits;
-}
-
-//==============================================================================
-auto Planner::Configuration::interpolation(Interpolate::Options interpolate)
--> Configuration&
-{
-  _pimpl->interpolation = std::move(interpolate);
-  return *this;
-}
-
-//==============================================================================
-Interpolate::Options& Planner::Configuration::interpolation()
-{
-  return _pimpl->interpolation;
-}
-
-//==============================================================================
-const Interpolate::Options& Planner::Configuration::interpolation() const
-{
-  return _pimpl->interpolation;
-}
-
-//==============================================================================
-class Planner::Options::Implementation
-{
-public:
-
-  const schedule::Viewer* viewer;
-  Duration min_hold_time;
-  const bool* interrupt_flag;
-  std::unordered_set<schedule::Version> ignore_schedule_ids;
-
-};
-
-//==============================================================================
-Planner::Options::Options(
-    const schedule::Viewer& viewer,
-    const Duration min_hold_time,
-    const bool* interrupt_flag,
-    std::unordered_set<schedule::Version> ignore_ids)
-  : _pimpl(rmf_utils::make_impl<Implementation>(
-             Implementation{
-               &viewer,
-               min_hold_time,
-               interrupt_flag,
-               std::move(ignore_ids)
-             }))
-{
-  // Do nothing
-}
-
-//==============================================================================
-auto Planner::Options::schedule_viewer(const schedule::Viewer& viewer)
--> Options&
-{
-  _pimpl->viewer = &viewer;
-  return *this;
-}
-
-//==============================================================================
-const schedule::Viewer& Planner::Options::schedule_viewer() const
-{
-  return *_pimpl->viewer;
-}
-
-//==============================================================================
-auto Planner::Options::minimum_holding_time(const Duration holding_time)
--> Options&
-{
-  _pimpl->min_hold_time = holding_time;
-  return *this;
-}
-
-//==============================================================================
-Duration Planner::Options::minimum_holding_time() const
-{
-  return _pimpl->min_hold_time;
-}
-
-//==============================================================================
-auto Planner::Options::interrupt_flag(const bool* flag) -> Options&
-{
-  _pimpl->interrupt_flag = flag;
-  return *this;
-}
-
-//==============================================================================
-const bool* Planner::Options::interrupt_flag() const
-{
-  return _pimpl->interrupt_flag;
-}
-
-//==============================================================================
-auto Planner::Options::ignore_schedule_ids(
-    std::unordered_set<schedule::Version> ignore_ids) -> Options&
-{
-  _pimpl->ignore_schedule_ids = std::move(ignore_ids);
-  return *this;
-}
-
-//==============================================================================
-std::unordered_set<schedule::Version> Planner::Options
-::ignore_schedule_ids() const
-{
-  return _pimpl->ignore_schedule_ids;
-}
-
-//==============================================================================
-class Planner::Start::Implementation
+class ConflictData::Implementation
 {
 public:
 
   Time time;
-  std::size_t waypoint;
-  double orientation;
-  rmf_utils::optional<Eigen::Vector2d> location;
-  rmf_utils::optional<std::size_t> lane;
+  Segments segments;
 
 };
 
 //==============================================================================
-Planner::Start::Start(
-    const Time initial_time,
-    const std::size_t initial_waypoint,
-    const double initial_orientation,
-    rmf_utils::optional<Eigen::Vector2d> initial_location,
-    rmf_utils::optional<std::size_t> initial_lane)
-  : _pimpl(rmf_utils::make_impl<Implementation>(
-             Implementation{
-               initial_time,
-               initial_waypoint,
-               initial_orientation,
-               std::move(initial_location),
-               initial_lane
-             }))
-{
-  // Do nothing
-}
-
-//==============================================================================
-auto Planner::Start::time(const Time initial_time) -> Start&
-{
-  _pimpl->time = initial_time;
-  return *this;
-}
-
-//==============================================================================
-Time Planner::Start::time() const
+Time ConflictData::get_time() const
 {
   return _pimpl->time;
 }
 
 //==============================================================================
-auto Planner::Start::waypoint(const std::size_t initial_waypoint) -> Start&
+const ConflictData::Segments& ConflictData::get_segments() const
 {
-  _pimpl->waypoint = initial_waypoint;
-  return *this;
+  return _pimpl->segments;
 }
 
 //==============================================================================
-std::size_t Planner::Start::waypoint() const
-{
-  return _pimpl->waypoint;
-}
-
-//==============================================================================
-auto Planner::Start::orientation(const double initial_orientation) -> Start&
-{
-  _pimpl->orientation = initial_orientation;
-  return *this;
-}
-
-//==============================================================================
-double Planner::Start::orientation() const
-{
-  return _pimpl->orientation;
-}
-
-//==============================================================================
-rmf_utils::optional<Eigen::Vector2d> Planner::Start::location() const
-{
-  return _pimpl->location;
-}
-
-//==============================================================================
-auto Planner::Start::location(
-    rmf_utils::optional<Eigen::Vector2d> initial_location) -> Start&
-{
-  _pimpl->location = std::move(initial_location);
-  return *this;
-}
-
-//==============================================================================
-rmf_utils::optional<std::size_t> Planner::Start::lane() const
-{
-  return _pimpl->lane;
-}
-
-//==============================================================================
-auto Planner::Start::lane(
-    rmf_utils::optional<std::size_t> initial_lane) -> Start&
-{
-  _pimpl->lane = initial_lane;
-  return *this;
-}
-
-//==============================================================================
-class Planner::Goal::Implementation
-{
-public:
-
-  std::size_t waypoint;
-
-  rmf_utils::optional<double> orientation;
-
-};
-
-//==============================================================================
-Planner::Goal::Goal(const std::size_t waypoint)
-  : _pimpl(rmf_utils::make_impl<Implementation>(
-             Implementation{
-               waypoint,
-               rmf_utils::nullopt
-             }))
+ConflictData::ConflictData()
 {
   // Do nothing
 }
 
 //==============================================================================
-Planner::Goal::Goal(
-    const std::size_t waypoint,
-    const double goal_orientation)
-  : _pimpl(rmf_utils::make_impl<Implementation>(
-             Implementation{
-               waypoint,
-               goal_orientation
-             }))
-{
-  // Do nothing
-}
-
-//==============================================================================
-auto Planner::Goal::waypoint(const std::size_t goal_waypoint) -> Goal&
-{
-  _pimpl->waypoint = goal_waypoint;
-  return *this;
-}
-
-//==============================================================================
-std::size_t Planner::Goal::waypoint() const
-{
-  return _pimpl->waypoint;
-}
-
-//==============================================================================
-auto Planner::Goal::orientation(const double goal_orientation) -> Goal&
-{
-  _pimpl->orientation = goal_orientation;
-  return *this;
-}
-
-//==============================================================================
-auto Planner::Goal::any_orientation() -> Goal&
-{
-  _pimpl->orientation = rmf_utils::nullopt;
-  return *this;
-}
-
-//==============================================================================
-const double* Planner::Goal::orientation() const
-{
-  if(_pimpl->orientation)
-    return &(*_pimpl->orientation);
-
-  return nullptr;
-}
-
-//==============================================================================
-class Planner::Implementation
+class invalid_trajectory_error::Implementation
 {
 public:
 
-  internal::planning::CacheManager cache_mgr;
+  std::string what;
 
-  Options default_options;
-
-  Configuration configuration;
-
-};
-
-//==============================================================================
-class Plan::Implementation
-{
-public:
-
-  internal::planning::Result result;
-
-  internal::planning::CacheManager cache_mgr;
-
-
-  static rmf_utils::optional<Plan> generate(
-      internal::planning::CacheManager cache_mgr,
-      const std::vector<Planner::Start>& starts,
-      Planner::Goal goal,
-      Planner::Options options)
+  static invalid_trajectory_error make_segment_num_error(
+      std::size_t num_segments)
   {
-    auto result = cache_mgr.get().plan(
-        {starts}, std::move(goal), std::move(options));
-
-    if (!result)
-      return rmf_utils::nullopt;
-
-    Plan plan;
-    plan._pimpl = rmf_utils::make_impl<Implementation>(
-          Implementation{std::move(*result), std::move(cache_mgr)});
-
-    return std::move(plan);
+    invalid_trajectory_error error;
+    error._pimpl->what = std::string()
+        + "[rmf_traffic::invalid_trajectory_error] Attempted to check a "
+        + "conflict with a Trajectory that has [" + std::to_string(num_segments)
+        + "] segments. This is not supported. Trajectories must have at least "
+        + "2 segments to check them for conflicts.";
+    return error;
   }
 
+  static invalid_trajectory_error make_missing_shape_error(
+      const Time time)
+  {
+    invalid_trajectory_error error;
+    error._pimpl->what = std::string()
+        + "[rmf_traffic::invalid_trajectory_error] Attempting to check a "
+        + "conflict with a Trajectory that has no shape specified for the "
+        + "profile of its segment at time ["
+        + std::to_string(time.time_since_epoch().count())
+        + "ns]. This is not supported.";
+
+    return error;
+  }
 };
 
 //==============================================================================
-Planner::Planner(
-    Configuration config,
-    Options default_options)
-  : _pimpl(rmf_utils::make_impl<Implementation>(
-             Implementation{
-               internal::planning::make_cache(config),
-               std::move(default_options),
-               config
-             }))
+const char* invalid_trajectory_error::what() const noexcept
 {
-  // Do nothing
+  return _pimpl->what.c_str();
 }
 
 //==============================================================================
-auto Planner::get_configuration() const -> const Configuration&
+invalid_trajectory_error::invalid_trajectory_error()
+  : _pimpl(rmf_utils::make_impl<Implementation>())
 {
-  return _pimpl->configuration;
+  // This constructor is a no-op, but we'll keep a definition for it in case we
+  // need it in the future. Allowing the default constructor to be inferred
+  // could cause issues if we want to change the implementation of this
+  // exception in the future, like if we want to add more information to the
+  // error message output.
 }
 
 //==============================================================================
-Planner& Planner::set_default_options(Options default_options)
+std::vector<ConflictData> DetectConflict::between(
+    const Trajectory& trajectory_a,
+    const Trajectory& trajectory_b,
+    const bool quit_after_one)
 {
-  _pimpl->default_options = std::move(default_options);
-  return *this;
-}
+  if(!broad_phase(trajectory_a, trajectory_b))
+    return {};
 
-//==============================================================================
-auto Planner::get_default_options() -> Options&
-{
-  return _pimpl->default_options;
-}
-
-//==============================================================================
-auto Planner::get_default_options() const -> const Options&
-{
-  return _pimpl->default_options;
-}
-
-//==============================================================================
-rmf_utils::optional<Plan> Planner::plan(const Start& start, Goal goal) const
-{
-  return Plan::Implementation::generate(
-        _pimpl->cache_mgr,
-        {start},
-        std::move(goal),
-        _pimpl->default_options);
-}
-
-//==============================================================================
-rmf_utils::optional<Plan> Planner::plan(
-    const Start& start,
-    Goal goal,
-    Options options) const
-{
-  return Plan::Implementation::generate(
-        _pimpl->cache_mgr,
-        {start},
-        std::move(goal),
-        std::move(options));
-}
-
-//==============================================================================
-rmf_utils::optional<Plan> Planner::plan(const StartSet& starts, Goal goal) const
-{
-  return Plan::Implementation::generate(
-        _pimpl->cache_mgr,
-        starts,
-        std::move(goal),
-        _pimpl->default_options);
-}
-
-//==============================================================================
-rmf_utils::optional<Plan> Planner::plan(
-    const StartSet& starts,
-    Goal goal,
-    Options options) const
-{
-  return Plan::Implementation::generate(
-        _pimpl->cache_mgr,
-        starts,
-        std::move(goal),
-        std::move(options));
-}
-
-//==============================================================================
-const Eigen::Vector3d& Plan::Waypoint::position() const
-{
-  return _pimpl->position;
-}
-
-//==============================================================================
-rmf_traffic::Time Plan::Waypoint::time() const
-{
-  return _pimpl->time;
-}
-
-//==============================================================================
-rmf_utils::optional<std::size_t> Plan::Waypoint::graph_index() const
-{
-  return _pimpl->graph_index;
-}
-
-//==============================================================================
-const Graph::Lane::Event* Plan::Waypoint::event() const
-{
-  return _pimpl->event.get();
-}
-
-//==============================================================================
-Plan::Waypoint::Waypoint()
-{
-  // Do nothing
-}
-
-//==============================================================================
-const std::vector<Trajectory>& Plan::get_trajectories() const
-{
-  return _pimpl->result.trajectories;
-}
-
-//==============================================================================
-const std::vector<Plan::Waypoint>& Plan::get_waypoints() const
-{
-  return _pimpl->result.waypoints;
-}
-
-//==============================================================================
-rmf_utils::optional<Plan> Plan::replan(const Start& new_start) const
-{
-  return Plan::Implementation::generate(
-        _pimpl->cache_mgr,
-        {new_start},
-        _pimpl->result.goal,
-        _pimpl->result.options);
-}
-
-//==============================================================================
-rmf_utils::optional<Plan> Plan::replan(
-    const Planner::Start& new_start,
-    Planner::Options new_options) const
-{
-  return Plan::Implementation::generate(
-        _pimpl->cache_mgr,
-        {new_start},
-        _pimpl->result.goal,
-        std::move(new_options));
-}
-
-//==============================================================================
-rmf_utils::optional<Plan> Plan::replan(const StartSet& new_starts) const
-{
-  return Plan::Implementation::generate(
-        _pimpl->cache_mgr,
-        new_starts,
-        _pimpl->result.goal,
-        _pimpl->result.options);
-}
-
-//==============================================================================
-rmf_utils::optional<Plan> Plan::replan(
-    const StartSet& new_starts,
-    Options new_options) const
-{
-  return Plan::Implementation::generate(
-        _pimpl->cache_mgr,
-        new_starts,
-        _pimpl->result.goal,
-        std::move(new_options));
-}
-
-//==============================================================================
-const Planner::Start& Plan::get_start() const
-{
-  return _pimpl->result.start;
-}
-
-//==============================================================================
-const Planner::Goal& Plan::get_goal() const
-{
-  return _pimpl->result.goal;
-}
-
-//==============================================================================
-const Planner::Options& Plan::get_options() const
-{
-  return _pimpl->result.options;
-}
-
-//==============================================================================
-const Planner::Configuration& Plan::get_configuration() const
-{
-  return _pimpl->cache_mgr.get_configuration();
+  return narrow_phase(trajectory_a, trajectory_b, quit_after_one);
 }
 
 //==============================================================================
 
-std::vector<Plan::Start> compute_plan_starts(
-    const rmf_traffic::agv::Graph& graph,
-    const Eigen::Vector3d pose,
-    const rmf_traffic::Time start_time,
-    const double max_merge_waypoint_distance,
-    const double max_merge_lane_distance,
-    const double min_lane_length)
-{
-  const Eigen::Vector2d p_location = {pose[0], pose[1]};
-  const double start_yaw = pose[2];
+namespace {
 
-  // If there are waypoints which are very close, take that as the only Start
-  for (std::size_t i=0; i < graph.num_waypoints() ; ++i)
+struct BoundingBox
+{
+  Eigen::Vector2d min;
+  Eigen::Vector2d max;
+};
+
+double evaluate_spline(
+    const Eigen::Vector4d& coeffs,
+    const double t)
+{
+  // Assume time is parameterized [0,1]
+  return (coeffs[3] * t * t * t
+      + coeffs[2] * t * t
+      + coeffs[1] * t
+      + coeffs[0]);
+}
+
+std::array<double, 2> get_local_extrema(
+    const Eigen::Vector4d& coeffs)
+{
+  std::vector<double> extrema_candidates;
+  // Store boundary values as potential extrema
+  extrema_candidates.emplace_back(evaluate_spline(coeffs, 0));
+  extrema_candidates.emplace_back(evaluate_spline(coeffs, 1));
+
+  // When derivate of spline motion is not quadratic
+  if (std::abs(coeffs[3]) < 1e-12)
   {
-    const auto& wp = graph.get_waypoint(i);
-    const Eigen::Vector2d wp_location = wp.get_location();
-
-    if ( (p_location - wp_location).norm() < max_merge_waypoint_distance)
+    if (std::abs(coeffs[2]) > 1e-12)
     {
-      return {Plan::Start(start_time, wp.index(), start_yaw)};
+      double t = -coeffs[1] / (2 * coeffs[2]);
+      extrema_candidates.emplace_back(evaluate_spline(coeffs, t));
     }
   }
-
-  // Iterate through the lanes and return the set of possible waypoints, i.e.
-  // entries and exits of nearby lanes.
-  std::vector<Plan::Start> starts;
-  std::unordered_set<std::size_t> raw_starts;
-
-  for (std::size_t i=0; i < graph.num_lanes(); ++i)
+  else
   {
-    const auto& lane = graph.get_lane(i);
-    const Eigen::Vector2d p0 = 
-        graph.get_waypoint(lane.entry().waypoint_index()).get_location();
-    const Eigen::Vector2d p1 =
-        graph.get_waypoint(lane.exit().waypoint_index()).get_location();
-    
-    const double lane_length = (p1 - p0).norm();
+    // Calculate the discriminant otherwise
+    double D = (4 * pow(coeffs[2], 2) - 12 * coeffs[3] * coeffs[1]);
 
-    // This "lane" is effectively a single point, so we'll skip it
-    if (lane_length < min_lane_length)
-      continue;
 
-    const Eigen::Vector2d pn = (p1 - p0) / lane_length;
-    const Eigen::Vector2d p_l = p_location - p0;
-    const double p_l_projection = p_l.dot(pn);
-
-    // If it's negative then its closest point on the lane is the entry point
-    if (p_l_projection < 0.0)
+    if (std::abs(D) < 1e-12)
     {
-      const double dist_to_entry = p_l.norm();
-      const std::size_t entry_waypoint_index = lane.entry().waypoint_index();
-
-      if (dist_to_entry < max_merge_lane_distance)
-      {
-        if (!raw_starts.insert(entry_waypoint_index).second)
-          continue;
-
-        starts.emplace_back(
-            Plan::Start(
-                start_time, entry_waypoint_index, start_yaw, p_location));
-      }
+      double t = (-2 * coeffs[2]) / (6 * coeffs[3]);
+      double extrema = evaluate_spline(coeffs, t);
+      extrema_candidates.emplace_back(extrema);
     }
-    // If it's larger than the lane length, then its closest point on the lane
-    // is the exit point.
-    else if (lane_length < p_l_projection)
+    else if (D < 0)
     {
-      const double dist_to_exit = (p_location - p1).norm();
-      const std::size_t exit_waypoint_index = lane.exit().waypoint_index();
-
-      if (dist_to_exit < max_merge_lane_distance)
-      {
-        if (!raw_starts.insert(exit_waypoint_index).second)
-          continue;
-
-        starts.emplace_back(
-            Plan::Start(
-                start_time, exit_waypoint_index, start_yaw, p_location));
-      }
+      assert(false);
     }
-    // If its between the entry and the exit waypoints, then we should
-    // compute it's distance away from the lane line.
     else
     {
-      const double lane_dist = (p_l - p_l_projection*pn).norm();
-      const std::size_t exit_waypoint_index = lane.exit().waypoint_index();
+      double t1 = ((-2 * coeffs[2]) + std::sqrt(D)) / (6 * coeffs[3]);
+      double t2 = ((-2 * coeffs[2]) - std::sqrt(D)) / (6 * coeffs[3]);
 
-      if (lane_dist < max_merge_lane_distance)
+      extrema_candidates.emplace_back(evaluate_spline(coeffs, t1));
+      extrema_candidates.emplace_back(evaluate_spline(coeffs, t2));
+    }
+  }
+  
+  std::array<double, 2> extrema;
+  assert(!extrema_candidates.empty());
+  extrema[0] = *std::min_element(
+      extrema_candidates.begin(),
+      extrema_candidates.end());
+  extrema[1] = *std::max_element(
+      extrema_candidates.begin(),
+      extrema_candidates.end());
+
+  return extrema;
+}
+
+BoundingBox get_bounding_box(const rmf_traffic::Spline& spline)
+{
+  BoundingBox bounding_box;
+
+  auto params = spline.get_params();
+  std::array<double, 2> extrema_x = get_local_extrema(params.coeffs[0]);
+  std::array<double, 2> extrema_y =  get_local_extrema(params.coeffs[1]);
+
+  Eigen::Vector2d min_coord = Eigen::Vector2d{extrema_x[0], extrema_y[0]};
+  Eigen::Vector2d max_coord = Eigen::Vector2d{extrema_x[1], extrema_y[1]};
+
+  double char_length =  params.profile_ptr->get_shape()
+      ->get_characteristic_length();
+
+  assert(char_length >= 0.0);
+  min_coord -= Eigen::Vector2d{char_length, char_length};
+  max_coord += Eigen::Vector2d{char_length, char_length};
+
+  bounding_box.min = min_coord;
+  bounding_box.max = max_coord;
+
+  return bounding_box;
+}
+
+bool overlap(const BoundingBox& box_a, const BoundingBox& box_b)
+{
+  for (std::size_t i=0; i < 2; ++i)
+  {
+    if (box_a.max[i] < box_b.min[i])
+      return false;
+
+    if (box_b.max[i] < box_a.min[i])
+      return false;
+  }
+
+  return true;
+}
+
+//==============================================================================
+std::shared_ptr<fcl::SplineMotion> make_uninitialized_fcl_spline_motion()
+{
+  // This function is only necessary because SplineMotion does not provide a
+  // default constructor, and we want to be able to instantiate one before
+  // we have any paramters to provide to it.
+  fcl::Matrix3f R;
+  fcl::Vec3f T;
+
+  // The constructor that we are using is a no-op (apparently it was declared,
+  // but its definition is just `// TODO`, so we don't need to worry about
+  // unintended consequences. If we update the version of FCL, this may change,
+  // so I'm going to leave a FIXME tag here to keep us aware of that.
+  return std::make_shared<fcl::SplineMotion>(R, T, R, T);
+}
+
+//==============================================================================
+std::tuple<Trajectory::const_iterator, Trajectory::const_iterator>
+get_initial_iterators(
+    const Trajectory& trajectory_a,
+    const Trajectory& trajectory_b)
+{
+  std::size_t min_size = std::min(trajectory_a.size(), trajectory_b.size());
+  if(min_size < 2)
+  {
+    throw invalid_trajectory_error::Implementation
+        ::make_segment_num_error(min_size);
+  }
+
+  const Time& t_a0 = *trajectory_a.start_time();
+  const Time& t_b0 = *trajectory_b.start_time();
+
+  Trajectory::const_iterator a_it;
+  Trajectory::const_iterator b_it;
+
+  if(t_a0 < t_b0)
+  {
+    // Trajectory `a` starts first, so we begin evaluating at the time
+    // that `b` begins
+    a_it = trajectory_a.find(t_b0);
+    b_it = ++trajectory_b.begin();
+  }
+  else if(t_b0 < t_a0)
+  {
+    // Trajectory `b` starts first, so we begin evaluating at the time
+    // that `a` begins
+    a_it = ++trajectory_a.begin();
+    b_it = trajectory_b.find(t_a0);
+  }
+  else
+  {
+    // The Trajectories begin at the exact same time, so both will begin
+    // from their start
+    a_it = ++trajectory_a.begin();
+    b_it = ++trajectory_b.begin();
+  }
+
+  return {a_it, b_it};
+}
+
+//==============================================================================
+fcl::ContinuousCollisionRequest make_fcl_request()
+{
+  fcl::ContinuousCollisionRequest request;
+  request.ccd_solver_type = fcl::CCDC_CONSERVATIVE_ADVANCEMENT;
+  request.gjk_solver_type = fcl::GST_LIBCCD;
+
+  return request;
+}
+
+} // anonymous namespace
+
+bool DetectConflict::broad_phase(
+    const Trajectory& trajectory_a,
+    const Trajectory& trajectory_b)
+{
+  std::size_t min_size = std::min(trajectory_a.size(), trajectory_b.size());
+  if(min_size < 2)
+  {
+    throw invalid_trajectory_error::Implementation
+        ::make_segment_num_error(min_size);
+  }
+
+  if(trajectory_a.get_map_name() != trajectory_b.get_map_name())
+    return false;
+
+  const auto* t_a0 = trajectory_a.start_time();
+  const auto* t_bf = trajectory_b.finish_time();
+
+  // Neither of these can be null, because both trajectories should have at
+  // least two elements.
+  assert(t_a0 != nullptr);
+  assert(t_bf != nullptr);
+
+  if(*t_bf < *t_a0)
+  {
+    // If Trajectory `b` finishes before Trajectory `a` starts, then there
+    // cannot be any conflict.
+    return false;
+  }
+
+  const auto* t_b0 = trajectory_b.start_time();
+  const auto* t_af = trajectory_a.finish_time();
+
+  // Neither of these can be null, because both trajectories should have at
+  // least two elements.
+  assert(t_b0 != nullptr);
+  assert(t_af != nullptr);
+
+  if(*t_af < *t_b0)
+  {
+    // If Trajectory `a` finished before Trajectory `b` starts, then there
+    // cannot be any conflict.
+    return false;
+  }
+
+  // Iterate through the segments of both trajectories to check for overlapping
+  // bounding boxes
+  Trajectory::const_iterator a_it;
+  Trajectory::const_iterator b_it;
+  std::tie(a_it, b_it) = get_initial_iterators(trajectory_a, trajectory_b);
+  assert(a_it != trajectory_a.end());
+  assert(b_it != trajectory_b.end());
+
+  Spline spline_a(a_it);
+  Spline spline_b(b_it);
+
+  while(a_it != trajectory_a.end() && b_it != trajectory_b.end())
+  {
+    // Increment a_it until spline_a will overlap with spline_b
+    if(a_it->get_finish_time() < spline_b.start_time())
+    {
+      ++a_it;
+      continue;
+    }
+
+    // Increment b_it until spline_b will overlap with spline_a
+    if(b_it->get_finish_time() < spline_a.start_time())
+    {
+      ++b_it;
+      continue;
+    }
+
+    spline_a = Spline(a_it);
+    spline_b = Spline(b_it);
+
+    auto box_a = get_bounding_box(spline_a);
+    auto box_b = get_bounding_box(spline_b);
+
+    if (overlap(box_a, box_b))
+      return true;
+
+    if(spline_a.finish_time() < spline_b.finish_time())
+    {
+      ++a_it;
+    }
+    else if(spline_b.finish_time() < spline_a.finish_time())
+    {
+      ++b_it;
+    }
+    else
+    {
+      ++a_it;
+      ++b_it;
+    }
+  }
+  return false;
+}
+
+class DetectConflict::Implementation
+{
+public:
+  static ConflictData make_conflict(Time time, ConflictData::Segments segments)
+  {
+    ConflictData result;
+    result._pimpl = rmf_utils::make_impl<ConflictData::Implementation>(
+          ConflictData::Implementation{time, std::move(segments)});
+
+    return result;
+  }
+};
+
+//==============================================================================
+std::vector<ConflictData> DetectConflict::narrow_phase(
+    const Trajectory& trajectory_a,
+    const Trajectory& trajectory_b,
+    const bool quit_after_one)
+{
+  Trajectory::const_iterator a_it;
+  Trajectory::const_iterator b_it;
+  std::tie(a_it, b_it) = get_initial_iterators(trajectory_a, trajectory_b);
+
+  // Verify that neither trajectory has run into a bug. These conditions should
+  // be guaranteed by
+  // 1. The assumption that the trajectories overlap (this is an assumption that
+  //    is made explicit to the user)
+  // 2. The min_size check up above
+  assert(a_it != trajectory_a.end());
+  assert(b_it != trajectory_b.end());
+
+  // Initialize the objects that will be used inside the loop
+  Spline spline_a(a_it);
+  Spline spline_b(b_it);
+  std::shared_ptr<fcl::SplineMotion> motion_a =
+      make_uninitialized_fcl_spline_motion();
+  std::shared_ptr<fcl::SplineMotion> motion_b =
+      make_uninitialized_fcl_spline_motion();
+
+  const fcl::ContinuousCollisionRequest request = make_fcl_request();
+  fcl::ContinuousCollisionResult result;
+  std::vector<ConflictData> conflicts;
+
+  while(a_it != trajectory_a.end() && b_it != trajectory_b.end())
+  {
+    // Increment a_it until spline_a will overlap with spline_b
+    if(a_it->get_finish_time() < spline_b.start_time())
+    {
+      ++a_it;
+      continue;
+    }
+
+    // Increment b_it until spline_b will overlap with spline_a
+    if(b_it->get_finish_time() < spline_a.start_time())
+    {
+      ++b_it;
+      continue;
+    }
+
+    const Trajectory::ConstProfilePtr profile_a = a_it->get_profile();
+    const Trajectory::ConstProfilePtr profile_b = b_it->get_profile();
+
+    // TODO(MXG): Consider using optional<Spline> so that we can easily keep
+    // track of which needs to be updated. There's some wasted computational
+    // cycles here whenever we are using the same spline as a previous iteration
+    spline_a = Spline(a_it);
+    spline_b = Spline(b_it);
+
+    const Time start_time =
+        std::max(spline_a.start_time(), spline_b.start_time());
+    const Time finish_time =
+        std::min(spline_a.finish_time(), spline_b.finish_time());
+
+    *motion_a = spline_a.to_fcl(start_time, finish_time);
+    *motion_b = spline_b.to_fcl(start_time, finish_time);
+
+    assert(profile_a->get_shape());
+    assert(profile_b->get_shape());
+    const auto obj_a = fcl::ContinuousCollisionObject(
+          geometry::FinalConvexShape::Implementation::get_collision(
+            *profile_a->get_shape()), motion_a);
+    const auto obj_b = fcl::ContinuousCollisionObject(
+          geometry::FinalConvexShape::Implementation::get_collision(
+            *profile_b->get_shape()), motion_b);
+
+    fcl::collide(&obj_a, &obj_b, request, result);
+    if(result.is_collide)
+    {
+      const double scaled_time = result.time_of_contact;
+      const Duration delta_t{
+        Duration::rep(scaled_time * (finish_time - start_time).count())};
+      const Time time = start_time + delta_t;
+      conflicts.emplace_back(Implementation::make_conflict(time, {a_it, b_it}));
+      if (quit_after_one)
+        return conflicts;
+    }
+
+    if(spline_a.finish_time() < spline_b.finish_time())
+    {
+      ++a_it;
+    }
+    else if(spline_b.finish_time() < spline_a.finish_time())
+    {
+      ++b_it;
+    }
+    else
+    {
+      ++a_it;
+      ++b_it;
+    }
+  }
+
+  return conflicts;
+}
+
+namespace internal {
+//==============================================================================
+bool detect_conflicts(
+    const Trajectory& trajectory,
+    const Spacetime& region,
+    std::vector<Trajectory::const_iterator>* output_iterators)
+{
+#ifndef NDEBUG
+  // This should never actually happen because this function only gets used
+  // internally, and so there should be several layers of quality checks on the
+  // trajectories to prevent this. But we'll put it in here just in case.
+  if(trajectory.size() < 2)
+  {
+    std::cerr << "[rmf_traffic::internal::detect_conflicts] An invalid "
+              << "trajectory was passed to detect_conflicts. This is a bug "
+              << "that should never happen. Please alert the RMF developers."
+              << std::endl;
+    throw invalid_trajectory_error::Implementation
+        ::make_segment_num_error(trajectory.size());
+  }
+#endif // NDEBUG
+
+  const Time trajectory_start_time = *trajectory.start_time();
+  const Time trajectory_finish_time = *trajectory.finish_time();
+
+  const Time start_time = region.lower_time_bound?
+        std::max(*region.lower_time_bound, trajectory_start_time)
+      : trajectory_start_time;
+
+  const Time finish_time = region.upper_time_bound?
+        std::min(*region.upper_time_bound, trajectory_finish_time)
+      : trajectory_finish_time;
+
+  if(finish_time < start_time)
+  {
+    // If the trajectory or region finishes before the other has started, that
+    // means there is no overlap in time between the region and the trajectory,
+    // so it is impossible for them to conflict.
+    return false;
+  }
+
+  const Trajectory::const_iterator begin_it =
+      trajectory_start_time < start_time?
+        trajectory.find(start_time) : ++trajectory.begin();
+
+  const Trajectory::const_iterator end_it =
+      finish_time < trajectory_finish_time?
+        ++trajectory.find(finish_time) : trajectory.end();
+
+  std::shared_ptr<fcl::SplineMotion> motion_trajectory =
+      make_uninitialized_fcl_spline_motion();
+  std::shared_ptr<internal::StaticMotion> motion_region =
+      std::make_shared<internal::StaticMotion>(region.pose);
+
+  const fcl::ContinuousCollisionRequest request = make_fcl_request();
+
+  bool collision_detected = false;
+
+  for(auto it = begin_it; it != end_it; ++it)
+  {
+    const Trajectory::ConstProfilePtr profile = it->get_profile();
+
+    Spline spline_trajectory{it};
+
+    const Time spline_start_time =
+        std::max(spline_trajectory.start_time(), start_time);
+    const Time spline_finish_time =
+        std::min(spline_trajectory.finish_time(), finish_time);
+
+    *motion_trajectory = spline_trajectory.to_fcl(
+          spline_start_time, spline_finish_time);
+
+    assert(profile->get_shape());
+    const auto obj_trajectory = fcl::ContinuousCollisionObject(
+          geometry::FinalConvexShape::Implementation::get_collision(
+            *profile->get_shape()), motion_trajectory);
+
+    assert(region.shape);
+    const auto& region_shapes = geometry::FinalShape::Implementation
+        ::get_collisions(*region.shape);
+    for(const auto& region_shape : region_shapes)
+    {
+      const auto obj_region = fcl::ContinuousCollisionObject(
+            region_shape, motion_region);
+
+      fcl::ContinuousCollisionResult result;
+      fcl::collide(&obj_trajectory, &obj_region, request, result);
+      if(result.is_collide)
       {
-        starts.emplace_back(
-            Plan::Start(
-                start_time, exit_waypoint_index, start_yaw, p_location, i));
+        if(output_iterators)
+        {
+          output_iterators->push_back(it);
+          collision_detected = true;
+        }
+        else
+        {
+          return true;
+        }
       }
     }
   }
 
-  return starts;
+  return collision_detected;
 }
+} // namespace internal
 
-} // namespace agv
 } // namespace rmf_traffic
 
