@@ -263,7 +263,8 @@ std::vector<Triangle> decompose_polygon(
   std::vector<Subpolygon> subpolygon_queue;
 
   // Creat the initial sub-polygon to analyze
-  subpolygon_queue.emplace_back([&polygon]() -> Subpolygon
+  subpolygon_queue.emplace_back(
+    [&polygon]() -> Subpolygon
   {
     Subpolygon sp;
     for(std::size_t i=0; i < polygon.size(); ++i)
