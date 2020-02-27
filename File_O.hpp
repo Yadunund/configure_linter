@@ -1,31 +1,30 @@
-Planner::Configuration::Configuration(
-    Graph graph,
-    VehicleTraits traits,
-    Interpolate::Options interpolation)
-: _pimpl(rmf_utils::make_impl<Implementation>(
-      Implementation{
-        std::move(graph),
-        std::move(traits),
-        std::move(interpolation)
-      }))
+void Viewer::Implementation::cull(Version id, Time time)
 {
-  // Do nothing
+  cull_has_occurred = true;
+  last_cull = std::make_pair(id, time);
+
+  std::unordered_set<Version> culled;
+  for(auto& pair : timelines)
+  {
+    Timeline& timeline = pair.second;
+    const Timeline::iterator last_it = timeline.lower_bound(time);
+    const Timeline::iterator end_it = last_it == timeline.end()?
+          timeline.end() : ++Timeline::iterator(last_it);
+
+    for(Timeline::iterator it = timeline.begin(); it != end_it; ++it)
+    {
+      Bucket& bucket = it->second;
+      const Bucket::iterator removed =
+          std::remove_if(bucket.begin(), bucket.end(),
+                     [&](const internal::ConstEntryPtr& entry) -> bool
+      {
+        return *entry->trajectory.finish_time() < time;
+      });
+
+      for(Bucket::iterator bit = removed; bit != bucket.end(); ++bit)
+        culled.insert((*bit)->version);
+
+      bucket.erase(removed, bucket.end());
+    }
+  }
 }
-
-relevant_changes.emplace_back(
-    Database::Change::Implementation::make_insert_ref(
-      &entry->trajectory, entry->version));
-
-
-result._pimpl = rmf_utils::make_impl<Implementation>(
-    Implementation{make_deep(std::move(trajectory)),
-      std::forward<Args>(args)...});
-
-result._pimpl = rmf_utils::make_impl<FinalShape::Implementation>(
-    FinalShape::Implementation{std::move(shape),
-    std::move(collisions),
-    characteristic_length});
-
-span._pimpl->maps = std::unordered_set<std::string>{
-    std::make_move_iterator(maps.begin()),
-    std::make_move_iterator(maps.end())};
