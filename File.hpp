@@ -15,13 +15,15 @@
  *
 */
 
+// test
+// test
 #include "Spline.hpp"
 
 namespace rmf_traffic {
 
 namespace {
 
-//==============================================================================
+// ==============================================================================
 Eigen::Matrix4d make_M_inv()
 {
   Eigen::Matrix4d M;
@@ -33,14 +35,14 @@ Eigen::Matrix4d make_M_inv()
   return M.inverse();
 }
 
-//==============================================================================
+// ==============================================================================
 double compute_delta_t(const Time& finish_time, const Time& start_time)
 {
   using Sec64 = std::chrono::duration<double>;
   return std::chrono::duration_cast<Sec64>(finish_time - start_time).count();
 }
 
-//==============================================================================
+// ==============================================================================
 std::array<Eigen::Vector4d, 3> compute_coefficients(
   const Eigen::Vector3d& x0,
   const Eigen::Vector3d& x1,
@@ -60,7 +62,7 @@ std::array<Eigen::Vector4d, 3> compute_coefficients(
   return coeffs;
 }
 
-//==============================================================================
+// ==============================================================================
 Spline::Parameters compute_parameters(
   const Trajectory::const_iterator& finish_it)
 {
@@ -91,7 +93,7 @@ Spline::Parameters compute_parameters(
   };
 }
 
-//==============================================================================
+// ==============================================================================
 Spline::Parameters compute_parameters(
   const internal::SegmentList::const_iterator& finish_it)
 {
@@ -122,7 +124,7 @@ Spline::Parameters compute_parameters(
   };
 }
 
-//==============================================================================
+// ==============================================================================
 double compute_scaled_time(const Time& time, const Spline::Parameters& params)
 {
   using Sec64 = std::chrono::duration<double>;
@@ -136,7 +138,7 @@ double compute_scaled_time(const Time& time, const Spline::Parameters& params)
   return scaled_time;
 }
 
-//==============================================================================
+// ==============================================================================
 Eigen::Vector3d compute_position(
   const Spline::Parameters& params,
   const double time)
@@ -152,7 +154,7 @@ Eigen::Vector3d compute_position(
   return result;
 }
 
-//==============================================================================
+// ==============================================================================
 Eigen::Vector3d compute_velocity(
   const Spline::Parameters& params,
   const double time)
@@ -169,7 +171,7 @@ Eigen::Vector3d compute_velocity(
   return result;
 }
 
-//==============================================================================
+// ==============================================================================
 Eigen::Vector3d compute_acceleration(
   const Spline::Parameters& params,
   const double time)
@@ -188,24 +190,24 @@ Eigen::Vector3d compute_acceleration(
 
 } // anonymous namespace
 
-//==============================================================================
+// ==============================================================================
 const Eigen::Matrix4d M_inv = make_M_inv();
 
-//==============================================================================
+// ==============================================================================
 Spline::Spline(const Trajectory::const_iterator& it)
 : params(compute_parameters(it))
 {
   // Do nothing
 }
 
-//==============================================================================
+// ==============================================================================
 Spline::Spline(const internal::SegmentList::const_iterator& it)
 : params(compute_parameters(it))
 {
   // Do nothing
 }
 
-//==============================================================================
+// ==============================================================================
 std::array<Eigen::Vector3d, 4> Spline::compute_knots(
   const Time start_time, const Time finish_time) const
 {
@@ -241,7 +243,7 @@ std::array<Eigen::Vector3d, 4> Spline::compute_knots(
   return result;
 }
 
-//==============================================================================
+// ==============================================================================
 fcl::SplineMotion Spline::to_fcl(
   const Time start_time, const Time finish_time) const
 {
@@ -262,26 +264,26 @@ fcl::SplineMotion Spline::to_fcl(
       Rd[0], Rd[1], Rd[2], Rd[3]);
 }
 
-//==============================================================================
+// ==============================================================================
 Time Spline::start_time() const
 {
   return params.time_range[0];
 }
 
-//==============================================================================
+// ==============================================================================
 Time Spline::finish_time() const
 {
   return params.time_range[1];
 }
 
-//==============================================================================
+// ==============================================================================
 Eigen::Vector3d Spline::compute_position(const Time at_time) const
 {
   return rmf_traffic::compute_position(
         params, compute_scaled_time(at_time, params));
 }
 
-//==============================================================================
+// ==============================================================================
 Eigen::Vector3d Spline::compute_velocity(const Time at_time) const
 {
   const double delta_t_inv = 1.0/params.delta_t;
@@ -289,7 +291,7 @@ Eigen::Vector3d Spline::compute_velocity(const Time at_time) const
         params, compute_scaled_time(at_time, params));
 }
 
-//==============================================================================
+// ==============================================================================
 Eigen::Vector3d Spline::compute_acceleration(const Time at_time) const
 {
   const double delta_t_inv = 1.0/params.delta_t;
@@ -297,7 +299,7 @@ Eigen::Vector3d Spline::compute_acceleration(const Time at_time) const
         params, compute_scaled_time(at_time, params));
 }
 
-//==============================================================================
+// ==============================================================================
 const Spline::Parameters& Spline::get_params() const
 {
   return params;
