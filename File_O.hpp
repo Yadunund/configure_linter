@@ -213,3 +213,10 @@ rmf_utils::optional<Plan> Planner::plan(const Start& start, Goal goal) const
         std::move(goal),
         _pimpl->default_options);
 }
+
+foo.emplace_back(Bar{
+  a,
+  b,
+  c
+  });
+

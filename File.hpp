@@ -12,9 +12,9 @@ Planner::Configuration::Configuration(
   Interpolate::Options interpolation)
 : _pimpl(rmf_utils::make_impl<Implementation>(
     Implementation{
-      std::move(graph),
-      std::move(traits),
-      std::move(interpolation)
+        std::move(graph),
+        std::move(traits),
+        std::move(interpolation)
       }))
 {
   // Do nothing
@@ -121,11 +121,11 @@ bool A::a() const
 
 queue.emplace(std::make_shared<Node>(
   Node{
-    args.waypoint,
-    estimate_remaining_cost(location),
-    0.0,
-    location,
-    nullptr
+      args.waypoint,
+      estimate_remaining_cost(location),
+      0.0,
+      location,
+      nullptr
   }));
 
 
@@ -156,9 +156,9 @@ const auto remove_it = std::remove_if(
 
 foo.emplace(std::make_shared<Bar>(
   Bar{
-    a,
-    b,
-    b,
+      a,
+      b,
+      b,
   }));
 
 
@@ -174,8 +174,8 @@ Foo::Foo(
   B b)
 : _bar(std::make_shared<Bar>(
     Bar{
-      a,
-      b,
+        a,
+        b,
       }))
 {
 
@@ -213,3 +213,10 @@ rmf_utils::optional<Plan> Planner::plan(const Start& start, Goal goal) const
         std::move(goal),
         _pimpl->default_options);
 }
+
+foo.emplace_back(Bar{
+    a,
+    b,
+    c
+  });
+
