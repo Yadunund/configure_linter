@@ -12,9 +12,9 @@ Planner::Configuration::Configuration(
   Interpolate::Options interpolation)
 : _pimpl(rmf_utils::make_impl<Implementation>(
     Implementation{
-          std::move(graph),
-          std::move(traits),
-          std::move(interpolation)
+      std::move(graph),
+      std::move(traits),
+      std::move(interpolation)
       }))
 {
   // Do nothing
@@ -29,7 +29,7 @@ relevant_changes.emplace_back(
     &entry->trajectory, entry->version));
 
 elements.emplace_back(Viewer::View::Element{
-      entry->version, entry->trajectory});
+    entry->version, entry->trajectory});
 
 result._pimpl = rmf_utils::make_impl<Implementation>(
   Implementation{make_deep(std::move(trajectory)),
@@ -48,8 +48,8 @@ for (Timeline::iterator it = timeline.begin(); it != end_it; ++it)
 {
   Bucket& bucket = it->second;
   const Bucket::iterator removed =
-      std::remove_if(bucket.begin(), bucket.end(),
-      [&](const internal::ConstEntryPtr& entry) -> bool
+    std::remove_if(bucket.begin(), bucket.end(),
+    [&](const internal::ConstEntryPtr& entry) -> bool
   {
     return *entry->trajectory.finish_time() < time;
   });
@@ -98,7 +98,7 @@ bool VehicleTraits::valid() const
       return get_differential()->valid();
 
     return true;
-  } ();
+  }();
 
   return linear().valid() && rotational().valid() && steering_valid;
 }
@@ -108,7 +108,7 @@ bool VehicleTraits::valid() const
 bool A::a() const
 {
   const bool c =
-      [&]() -> bool
+    [&]() -> bool
   {
     if (_pimpl->_steering_mode == Steering::Differential)
       return get_differential()->valid();
@@ -121,11 +121,11 @@ bool A::a() const
 
 queue.emplace(std::make_shared<Node>(
   Node{
-        args.waypoint,
-        estimate_remaining_cost(location),
-        0.0,
-        location,
-        nullptr
+    args.waypoint,
+    estimate_remaining_cost(location),
+    0.0,
+    location,
+    nullptr
   }));
 
 
@@ -147,8 +147,8 @@ const auto remove_it = std::remove_if(
   _pimpl->itinerary.begin(),
   _pimpl->itinerary.end(),
   [&](const Writer::Item& item)
-    {
-      return input_routes.count(item.id) > 0;
+{
+  return input_routes.count(item.id) > 0;
 });
 
 } // namespace q
@@ -156,9 +156,9 @@ const auto remove_it = std::remove_if(
 
 foo.emplace(std::make_shared<Bar>(
   Bar{
-        a,
-        b,
-        b,
+    a,
+    b,
+    b,
   }));
 
 
@@ -174,8 +174,8 @@ Foo::Foo(
   B b)
 : _bar(std::make_shared<Bar>(
     Bar{
-          a,
-          b,
+      a,
+      b,
       }))
 {
 
@@ -188,13 +188,13 @@ if (min_size < 2)
 }
 
 const Trajectory::const_iterator begin_it =
-    trajectory_start_time < start_time ?
-    trajectory.find(start_time) : ++trajectory.begin();
+  trajectory_start_time < start_time ?
+  trajectory.find(start_time) : ++trajectory.begin();
 
 const Eigen::Vector2d p = n->waypoint ?
-    graph.waypoints[*n->waypoint].get_location() :
-    n->trajectory_from_parent.back().get_finish_position()
-    .template block<2, 1>(0, 0);
+  graph.waypoints[*n->waypoint].get_location() :
+  n->trajectory_from_parent.back().get_finish_position()
+  .template block<2, 1>(0, 0);
 
 rmf_utils::optional<Plan> Plan::replan(const Start& new_start) const
 {
