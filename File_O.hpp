@@ -101,18 +101,18 @@ bool VehicleTraits::valid() const
   return linear().valid() && rotational().valid() && steering_valid;
 }
 
-// 
+//
 
 bool A::a() const
 {
   const bool c =
     [&]() -> bool
-  {
-    if (_pimpl->_steering_mode == Steering::Differential)
-      return get_differential()->valid();
+    {
+      if (_pimpl->_steering_mode == Steering::Differential)
+        return get_differential()->valid();
 
-    return true;
-  }();
+      return true;
+    } ();
 
   return linear().valid() && rotational().valid() && steering_valid;
 }
@@ -125,3 +125,28 @@ queue.emplace(std::make_shared<Node>(
     location,
     nullptr
   }));
+
+void func()
+{
+  return Result{
+    std::move(trajectories),
+    std::move(waypoints),
+    starts[start_index],
+    std::move(goal),
+    std::move(options)
+  };
+}
+
+namespace p {
+namespace q {
+
+const auto remove_it = std::remove_if(
+  _pimpl->itinerary.begin(),
+  _pimpl->itinerary.end(),
+  [&](const Writer::Item& item)
+{
+  return input_routes.count(item.id) > 0;
+});
+
+} // namespace q
+} // namespace p
