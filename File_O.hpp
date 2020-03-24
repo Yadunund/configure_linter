@@ -48,9 +48,9 @@ for (Timeline::iterator it = timeline.begin(); it != end_it; ++it)
   const Bucket::iterator removed =
     std::remove_if(bucket.begin(), bucket.end(),
     [&](const internal::ConstEntryPtr& entry) -> bool
-    {
-      return *entry->trajectory.finish_time() < time;
-    });
+  {
+    return *entry->trajectory.finish_time() < time;
+  });
 
   for (Bucket::iterator bit = removed; bit != bucket.end(); ++bit)
     culled.insert((*bit)->version);
@@ -107,12 +107,12 @@ bool A::a() const
 {
   const bool c =
     [&]() -> bool
-    {
-      if (_pimpl->_steering_mode == Steering::Differential)
-        return get_differential()->valid();
+  {
+    if (_pimpl->_steering_mode == Steering::Differential)
+      return get_differential()->valid();
 
-      return true;
-    } ();
+    return true;
+  } ();
 
   return linear().valid() && rotational().valid() && steering_valid;
 }
@@ -125,6 +125,7 @@ queue.emplace(std::make_shared<Node>(
     location,
     nullptr
   }));
+
 
 void func()
 {

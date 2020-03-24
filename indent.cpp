@@ -1,3 +1,6 @@
+namespace a {
+namespace b {
+
 auto Graph::add_waypoint(
     std::string map_name,
     Eigen::Vector2d location,
@@ -12,3 +15,6 @@ auto Graph::add_waypoint(
 
   return _pimpl->waypoints.back();
 }
+
+} // namespace a
+} // namespace b
