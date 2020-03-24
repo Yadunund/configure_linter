@@ -15,614 +15,293 @@
  *
 */
 
-#include "geometry/ShapeInternal.hpp"
-#include "DetectConflictInternal.hpp"
 #include "Spline.hpp"
-#include "StaticMotion.hpp"
-
-#include <rmf_traffic/Conflict.hpp>
-
-#include <fcl/continuous_collision.h>
-#include <fcl/ccd/motion.h>
-
-#include <unordered_map>
 
 namespace rmf_traffic {
 
-//==============================================================================
-class ConflictData::Implementation
-{
-public:
-
-  Time time;
-  Segments segments;
-
-};
+namespace {
 
 //==============================================================================
-Time ConflictData::get_time() const
+Eigen::Matrix4d make_M_inv()
 {
-  return _pimpl->time;
+  Eigen::Matrix4d M;
+  M.block<1,4>(0,0) <<  1.0/6.0, 2.0/3.0,  1.0/6.0,     0.0;
+  M.block<1,4>(1,0) << -1.0/2.0,     0.0,  1.0/2.0,     0.0;
+  M.block<1,4>(2,0) <<  1.0/2.0,    -1.0,  1.0/2.0,     0.0;
+  M.block<1,4>(3,0) << -1.0/6.0, 1.0/2.0, -1.0/2.0, 1.0/6.0;
+
+  return M.inverse();
 }
 
 //==============================================================================
-const ConflictData::Segments& ConflictData::get_segments() const
+double compute_delta_t(const Time& finish_time, const Time& start_time)
 {
-  return _pimpl->segments;
+  using Sec64 = std::chrono::duration<double>;
+  return std::chrono::duration_cast<Sec64>(finish_time - start_time).count();
 }
 
 //==============================================================================
-ConflictData::ConflictData()
+std::array<Eigen::Vector4d, 3> compute_coefficients(
+    const Eigen::Vector3d& x0,
+    const Eigen::Vector3d& x1,
+    const Eigen::Vector3d& v0,
+    const Eigen::Vector3d& v1)
+{
+  std::array<Eigen::Vector4d, 3> coeffs;
+  for(int i=0; i < 3; ++i)
+  {
+    std::size_t si = static_cast<std::size_t>(i);
+    coeffs[si][0] =                                x0[i]; // = d
+    coeffs[si][1] =            v0[i];                     // = c
+    coeffs[si][2] = -v1[i] - 2*v0[i] + 3*x1[i] - 3*x0[i]; // = b
+    coeffs[si][3] =  v1[i] +   v0[i] - 2*x1[i] + 2*x0[i]; // = a
+  }
+
+  return coeffs;
+}
+
+//==============================================================================
+Spline::Parameters compute_parameters(
+    const Trajectory::const_iterator& finish_it)
+{
+  const Trajectory::const_iterator start_it =
+      --Trajectory::const_iterator(finish_it);
+
+  const Trajectory::Segment& start = *start_it;
+  const Trajectory::Segment& finish = *finish_it;
+
+  const Time start_time = start.get_finish_time();
+  const Time finish_time = finish.get_finish_time();
+
+  const double delta_t = compute_delta_t(finish_time, start_time);
+
+  const Eigen::Vector3d x0 = start.get_finish_position();
+  const Eigen::Vector3d x1 = finish.get_finish_position();
+  const Eigen::Vector3d v0 = delta_t * start.get_finish_velocity();
+  const Eigen::Vector3d v1 = delta_t * finish.get_finish_velocity();
+
+  const rmf_traffic::Trajectory::ConstProfilePtr profile_ptr =
+      finish_it ->get_profile();
+
+  return {
+    profile_ptr,
+    compute_coefficients(x0, x1, v0, v1),
+    delta_t,
+    {start_time, finish_time}
+  };
+}
+
+//==============================================================================
+Spline::Parameters compute_parameters(
+    const internal::SegmentList::const_iterator& finish_it)
+{
+  const internal::SegmentList::const_iterator start_it =
+      --internal::SegmentList::const_iterator(finish_it);
+
+  const internal::SegmentElement::Data& start = start_it->data;
+  const internal::SegmentElement::Data& finish = finish_it->data;
+
+  const Time start_time = start.finish_time;
+  const Time finish_time = finish.finish_time;
+
+  const double delta_t = compute_delta_t(finish_time, start_time);
+
+  const Eigen::Vector3d x0 = start.position;
+  const Eigen::Vector3d x1 = finish.position;
+  const Eigen::Vector3d v0 = delta_t * start.velocity;
+  const Eigen::Vector3d v1 = delta_t * finish.velocity;
+
+  const rmf_traffic::Trajectory::ConstProfilePtr profile_ptr =
+      finish_it->data.profile;
+
+  return {
+    profile_ptr,
+    compute_coefficients(x0, x1, v0, v1),
+    delta_t,
+    {start_time, finish_time}
+  };
+}
+
+//==============================================================================
+double compute_scaled_time(const Time& time, const Spline::Parameters& params)
+{
+  using Sec64 = std::chrono::duration<double>;
+  const double relative_time =
+      std::chrono::duration_cast<Sec64>(time - params.time_range[0]).count();
+
+  const double scaled_time = relative_time / params.delta_t;
+  assert(0.0 - 1.0e-8 <= scaled_time);
+  assert(scaled_time <= 1.0 + 1.0e-8);
+
+  return scaled_time;
+}
+
+//==============================================================================
+Eigen::Vector3d compute_position(
+    const Spline::Parameters& params,
+    const double time)
+{
+  Eigen::Vector3d result = Eigen::Vector3d::Zero();
+  for(int i=0; i < 3; ++i)
+  {
+    const Eigen::Vector4d coeffs = params.coeffs[i];
+    for(int j=0; j < 4; ++j)
+      result[i] += coeffs[j] * pow(time, j);
+  }
+
+  return result;
+}
+
+//==============================================================================
+Eigen::Vector3d compute_velocity(
+    const Spline::Parameters& params,
+    const double time)
+{
+  Eigen::Vector3d result = Eigen::Vector3d::Zero();
+  for(int i=0; i < 3; ++i)
+  {
+    const Eigen::Vector4d coeffs = params.coeffs[i];
+    // Note: This is computing the derivative of the polynomial w.r.t. time
+    for(int j=1; j < 4; ++j)
+      result[i] += j * coeffs[j] * pow(time, j-1);
+  }
+
+  return result;
+}
+
+//==============================================================================
+Eigen::Vector3d compute_acceleration(
+    const Spline::Parameters& params,
+    const double time)
+{
+  Eigen::Vector3d result = Eigen::Vector3d::Zero();
+  for(int i=0; i < 3; ++i)
+  {
+    const Eigen::Vector4d coeffs = params.coeffs[i];
+    // Note: This is computing the second derivative w.r.t. time
+    for(int j=2; j < 4; ++j)
+      result[i] += j * (j-1) * coeffs[j] * pow(time, j-2);
+  }
+
+  return result;
+}
+
+} // anonymous namespace
+
+//==============================================================================
+const Eigen::Matrix4d M_inv = make_M_inv();
+
+//==============================================================================
+Spline::Spline(const Trajectory::const_iterator& it)
+  : params(compute_parameters(it))
 {
   // Do nothing
 }
 
 //==============================================================================
-class invalid_trajectory_error::Implementation
+Spline::Spline(const internal::SegmentList::const_iterator& it)
+  : params(compute_parameters(it))
 {
-public:
-
-  std::string what;
-
-  static invalid_trajectory_error make_segment_num_error(
-      std::size_t num_segments)
-  {
-    invalid_trajectory_error error;
-    error._pimpl->what = std::string()
-        + "[rmf_traffic::invalid_trajectory_error] Attempted to check a "
-        + "conflict with a Trajectory that has [" + std::to_string(num_segments)
-        + "] segments. This is not supported. Trajectories must have at least "
-        + "2 segments to check them for conflicts.";
-    return error;
-  }
-
-  static invalid_trajectory_error make_missing_shape_error(
-      const Time time)
-  {
-    invalid_trajectory_error error;
-    error._pimpl->what = std::string()
-        + "[rmf_traffic::invalid_trajectory_error] Attempting to check a "
-        + "conflict with a Trajectory that has no shape specified for the "
-        + "profile of its segment at time ["
-        + std::to_string(time.time_since_epoch().count())
-        + "ns]. This is not supported.";
-
-    return error;
-  }
-};
-
-//==============================================================================
-const char* invalid_trajectory_error::what() const noexcept
-{
-  return _pimpl->what.c_str();
+  // Do nothing
 }
 
 //==============================================================================
-invalid_trajectory_error::invalid_trajectory_error()
-  : _pimpl(rmf_utils::make_impl<Implementation>())
+std::array<Eigen::Vector3d, 4> Spline::compute_knots(
+    const Time start_time, const Time finish_time) const
 {
-  // This constructor is a no-op, but we'll keep a definition for it in case we
-  // need it in the future. Allowing the default constructor to be inferred
-  // could cause issues if we want to change the implementation of this
-  // exception in the future, like if we want to add more information to the
-  // error message output.
+  assert(params.time_range[0] <= start_time);
+  assert(finish_time <= params.time_range[1]);
+
+  const double scaled_delta_t =
+      compute_delta_t(finish_time, start_time) / params.delta_t;
+
+  const double scaled_start_time = compute_scaled_time(start_time, params);
+  const double scaled_finish_time = compute_scaled_time(finish_time, params);
+
+  const Eigen::Vector3d x0 =
+    rmf_traffic::compute_position(params, scaled_start_time);
+  const Eigen::Vector3d x1 =
+    rmf_traffic::compute_position(params, scaled_finish_time);
+  const Eigen::Vector3d v0 =
+    scaled_delta_t * rmf_traffic::compute_velocity(params, scaled_start_time);
+  const Eigen::Vector3d v1 =
+    scaled_delta_t * rmf_traffic::compute_velocity(params, scaled_finish_time);
+
+  const std::array<Eigen::Vector4d, 3> subspline_coeffs =
+      compute_coefficients(x0, x1, v0, v1);
+
+  std::array<Eigen::Vector3d, 4> result;
+  for(std::size_t i=0; i < 3; ++i)
+  {
+    const Eigen::Vector4d p = M_inv * subspline_coeffs[i];
+    for(int j=0; j < 4; ++j)
+      result[j][i] = p[j];
+  }
+
+  return result;
 }
 
 //==============================================================================
-std::vector<ConflictData> DetectConflict::between(
-    const Trajectory& trajectory_a,
-    const Trajectory& trajectory_b,
-    const bool quit_after_one)
+fcl::SplineMotion Spline::to_fcl(
+    const Time start_time, const Time finish_time) const
 {
-  if(!broad_phase(trajectory_a, trajectory_b))
-    return {};
+  std::array<Eigen::Vector3d, 4> knots = compute_knots(start_time, finish_time);
 
-  return narrow_phase(trajectory_a, trajectory_b, quit_after_one);
+  std::array<fcl::Vec3f, 4> Td;
+  std::array<fcl::Vec3f, 4> Rd;
+
+  for(std::size_t i=0; i < 4; ++i)
+  {
+    const Eigen::Vector3d p = knots[i];
+    Td[i] = fcl::Vec3f(p[0], p[1], 0.0);
+    Rd[i] = fcl::Vec3f(0.0, 0.0, p[2]);
+  }
+
+  return fcl::SplineMotion(
+      Td[0], Td[1], Td[2], Td[3],
+      Rd[0], Rd[1], Rd[2], Rd[3]);
 }
 
 //==============================================================================
-
-namespace {
-
-struct BoundingBox
+Time Spline::start_time() const
 {
-  Eigen::Vector2d min;
-  Eigen::Vector2d max;
-};
-
-double evaluate_spline(
-    const Eigen::Vector4d& coeffs,
-    const double t)
-{
-  // Assume time is parameterized [0,1]
-  return (coeffs[3] * t * t * t
-      + coeffs[2] * t * t
-      + coeffs[1] * t
-      + coeffs[0]);
-}
-
-std::array<double, 2> get_local_extrema(
-    const Eigen::Vector4d& coeffs)
-{
-  std::vector<double> extrema_candidates;
-  // Store boundary values as potential extrema
-  extrema_candidates.emplace_back(evaluate_spline(coeffs, 0));
-  extrema_candidates.emplace_back(evaluate_spline(coeffs, 1));
-
-  // When derivate of spline motion is not quadratic
-  if (std::abs(coeffs[3]) < 1e-12)
-  {
-    if (std::abs(coeffs[2]) > 1e-12)
-    {
-      double t = -coeffs[1] / (2 * coeffs[2]);
-      extrema_candidates.emplace_back(evaluate_spline(coeffs, t));
-    }
-  }
-  else
-  {
-    // Calculate the discriminant otherwise
-    double D = (4 * pow(coeffs[2], 2) - 12 * coeffs[3] * coeffs[1]);
-
-
-    if (std::abs(D) < 1e-12)
-    {
-      double t = (-2 * coeffs[2]) / (6 * coeffs[3]);
-      double extrema = evaluate_spline(coeffs, t);
-      extrema_candidates.emplace_back(extrema);
-    }
-    else if (D < 0)
-    {
-      assert(false);
-    }
-    else
-    {
-      double t1 = ((-2 * coeffs[2]) + std::sqrt(D)) / (6 * coeffs[3]);
-      double t2 = ((-2 * coeffs[2]) - std::sqrt(D)) / (6 * coeffs[3]);
-
-      extrema_candidates.emplace_back(evaluate_spline(coeffs, t1));
-      extrema_candidates.emplace_back(evaluate_spline(coeffs, t2));
-    }
-  }
-  
-  std::array<double, 2> extrema;
-  assert(!extrema_candidates.empty());
-  extrema[0] = *std::min_element(
-      extrema_candidates.begin(),
-      extrema_candidates.end());
-  extrema[1] = *std::max_element(
-      extrema_candidates.begin(),
-      extrema_candidates.end());
-
-  return extrema;
-}
-
-BoundingBox get_bounding_box(const rmf_traffic::Spline& spline)
-{
-  BoundingBox bounding_box;
-
-  auto params = spline.get_params();
-  std::array<double, 2> extrema_x = get_local_extrema(params.coeffs[0]);
-  std::array<double, 2> extrema_y =  get_local_extrema(params.coeffs[1]);
-
-  Eigen::Vector2d min_coord = Eigen::Vector2d{extrema_x[0], extrema_y[0]};
-  Eigen::Vector2d max_coord = Eigen::Vector2d{extrema_x[1], extrema_y[1]};
-
-  double char_length =  params.profile_ptr->get_shape()
-      ->get_characteristic_length();
-
-  assert(char_length >= 0.0);
-  min_coord -= Eigen::Vector2d{char_length, char_length};
-  max_coord += Eigen::Vector2d{char_length, char_length};
-
-  bounding_box.min = min_coord;
-  bounding_box.max = max_coord;
-
-  return bounding_box;
-}
-
-bool overlap(const BoundingBox& box_a, const BoundingBox& box_b)
-{
-  for (std::size_t i=0; i < 2; ++i)
-  {
-    if (box_a.max[i] < box_b.min[i])
-      return false;
-
-    if (box_b.max[i] < box_a.min[i])
-      return false;
-  }
-
-  return true;
+  return params.time_range[0];
 }
 
 //==============================================================================
-std::shared_ptr<fcl::SplineMotion> make_uninitialized_fcl_spline_motion()
+Time Spline::finish_time() const
 {
-  // This function is only necessary because SplineMotion does not provide a
-  // default constructor, and we want to be able to instantiate one before
-  // we have any paramters to provide to it.
-  fcl::Matrix3f R;
-  fcl::Vec3f T;
-
-  // The constructor that we are using is a no-op (apparently it was declared,
-  // but its definition is just `// TODO`, so we don't need to worry about
-  // unintended consequences. If we update the version of FCL, this may change,
-  // so I'm going to leave a FIXME tag here to keep us aware of that.
-  return std::make_shared<fcl::SplineMotion>(R, T, R, T);
+  return params.time_range[1];
 }
 
 //==============================================================================
-std::tuple<Trajectory::const_iterator, Trajectory::const_iterator>
-get_initial_iterators(
-    const Trajectory& trajectory_a,
-    const Trajectory& trajectory_b)
+Eigen::Vector3d Spline::compute_position(const Time at_time) const
 {
-  std::size_t min_size = std::min(trajectory_a.size(), trajectory_b.size());
-  if(min_size < 2)
-  {
-    throw invalid_trajectory_error::Implementation
-        ::make_segment_num_error(min_size);
-  }
-
-  const Time& t_a0 = *trajectory_a.start_time();
-  const Time& t_b0 = *trajectory_b.start_time();
-
-  Trajectory::const_iterator a_it;
-  Trajectory::const_iterator b_it;
-
-  if(t_a0 < t_b0)
-  {
-    // Trajectory `a` starts first, so we begin evaluating at the time
-    // that `b` begins
-    a_it = trajectory_a.find(t_b0);
-    b_it = ++trajectory_b.begin();
-  }
-  else if(t_b0 < t_a0)
-  {
-    // Trajectory `b` starts first, so we begin evaluating at the time
-    // that `a` begins
-    a_it = ++trajectory_a.begin();
-    b_it = trajectory_b.find(t_a0);
-  }
-  else
-  {
-    // The Trajectories begin at the exact same time, so both will begin
-    // from their start
-    a_it = ++trajectory_a.begin();
-    b_it = ++trajectory_b.begin();
-  }
-
-  return {a_it, b_it};
+  return rmf_traffic::compute_position(
+        params, compute_scaled_time(at_time, params));
 }
 
 //==============================================================================
-fcl::ContinuousCollisionRequest make_fcl_request()
+Eigen::Vector3d Spline::compute_velocity(const Time at_time) const
 {
-  fcl::ContinuousCollisionRequest request;
-  request.ccd_solver_type = fcl::CCDC_CONSERVATIVE_ADVANCEMENT;
-  request.gjk_solver_type = fcl::GST_LIBCCD;
-
-  return request;
+  const double delta_t_inv = 1.0/params.delta_t;
+  return delta_t_inv * rmf_traffic::compute_velocity(
+        params, compute_scaled_time(at_time, params));
 }
-
-} // anonymous namespace
-
-bool DetectConflict::broad_phase(
-    const Trajectory& trajectory_a,
-    const Trajectory& trajectory_b)
-{
-  std::size_t min_size = std::min(trajectory_a.size(), trajectory_b.size());
-  if(min_size < 2)
-  {
-    throw invalid_trajectory_error::Implementation
-        ::make_segment_num_error(min_size);
-  }
-
-  if(trajectory_a.get_map_name() != trajectory_b.get_map_name())
-    return false;
-
-  const auto* t_a0 = trajectory_a.start_time();
-  const auto* t_bf = trajectory_b.finish_time();
-
-  // Neither of these can be null, because both trajectories should have at
-  // least two elements.
-  assert(t_a0 != nullptr);
-  assert(t_bf != nullptr);
-
-  if(*t_bf < *t_a0)
-  {
-    // If Trajectory `b` finishes before Trajectory `a` starts, then there
-    // cannot be any conflict.
-    return false;
-  }
-
-  const auto* t_b0 = trajectory_b.start_time();
-  const auto* t_af = trajectory_a.finish_time();
-
-  // Neither of these can be null, because both trajectories should have at
-  // least two elements.
-  assert(t_b0 != nullptr);
-  assert(t_af != nullptr);
-
-  if(*t_af < *t_b0)
-  {
-    // If Trajectory `a` finished before Trajectory `b` starts, then there
-    // cannot be any conflict.
-    return false;
-  }
-
-  // Iterate through the segments of both trajectories to check for overlapping
-  // bounding boxes
-  Trajectory::const_iterator a_it;
-  Trajectory::const_iterator b_it;
-  std::tie(a_it, b_it) = get_initial_iterators(trajectory_a, trajectory_b);
-  assert(a_it != trajectory_a.end());
-  assert(b_it != trajectory_b.end());
-
-  Spline spline_a(a_it);
-  Spline spline_b(b_it);
-
-  while(a_it != trajectory_a.end() && b_it != trajectory_b.end())
-  {
-    // Increment a_it until spline_a will overlap with spline_b
-    if(a_it->get_finish_time() < spline_b.start_time())
-    {
-      ++a_it;
-      continue;
-    }
-
-    // Increment b_it until spline_b will overlap with spline_a
-    if(b_it->get_finish_time() < spline_a.start_time())
-    {
-      ++b_it;
-      continue;
-    }
-
-    spline_a = Spline(a_it);
-    spline_b = Spline(b_it);
-
-    auto box_a = get_bounding_box(spline_a);
-    auto box_b = get_bounding_box(spline_b);
-
-    if (overlap(box_a, box_b))
-      return true;
-
-    if(spline_a.finish_time() < spline_b.finish_time())
-    {
-      ++a_it;
-    }
-    else if(spline_b.finish_time() < spline_a.finish_time())
-    {
-      ++b_it;
-    }
-    else
-    {
-      ++a_it;
-      ++b_it;
-    }
-  }
-  return false;
-}
-
-class DetectConflict::Implementation
-{
-public:
-  static ConflictData make_conflict(Time time, ConflictData::Segments segments)
-  {
-    ConflictData result;
-    result._pimpl = rmf_utils::make_impl<ConflictData::Implementation>(
-          ConflictData::Implementation{time, std::move(segments)});
-
-    return result;
-  }
-};
 
 //==============================================================================
-std::vector<ConflictData> DetectConflict::narrow_phase(
-    const Trajectory& trajectory_a,
-    const Trajectory& trajectory_b,
-    const bool quit_after_one)
+Eigen::Vector3d Spline::compute_acceleration(const Time at_time) const
 {
-  Trajectory::const_iterator a_it;
-  Trajectory::const_iterator b_it;
-  std::tie(a_it, b_it) = get_initial_iterators(trajectory_a, trajectory_b);
-
-  // Verify that neither trajectory has run into a bug. These conditions should
-  // be guaranteed by
-  // 1. The assumption that the trajectories overlap (this is an assumption that
-  //    is made explicit to the user)
-  // 2. The min_size check up above
-  assert(a_it != trajectory_a.end());
-  assert(b_it != trajectory_b.end());
-
-  // Initialize the objects that will be used inside the loop
-  Spline spline_a(a_it);
-  Spline spline_b(b_it);
-  std::shared_ptr<fcl::SplineMotion> motion_a =
-      make_uninitialized_fcl_spline_motion();
-  std::shared_ptr<fcl::SplineMotion> motion_b =
-      make_uninitialized_fcl_spline_motion();
-
-  const fcl::ContinuousCollisionRequest request = make_fcl_request();
-  fcl::ContinuousCollisionResult result;
-  std::vector<ConflictData> conflicts;
-
-  while(a_it != trajectory_a.end() && b_it != trajectory_b.end())
-  {
-    // Increment a_it until spline_a will overlap with spline_b
-    if(a_it->get_finish_time() < spline_b.start_time())
-    {
-      ++a_it;
-      continue;
-    }
-
-    // Increment b_it until spline_b will overlap with spline_a
-    if(b_it->get_finish_time() < spline_a.start_time())
-    {
-      ++b_it;
-      continue;
-    }
-
-    const Trajectory::ConstProfilePtr profile_a = a_it->get_profile();
-    const Trajectory::ConstProfilePtr profile_b = b_it->get_profile();
-
-    // TODO(MXG): Consider using optional<Spline> so that we can easily keep
-    // track of which needs to be updated. There's some wasted computational
-    // cycles here whenever we are using the same spline as a previous iteration
-    spline_a = Spline(a_it);
-    spline_b = Spline(b_it);
-
-    const Time start_time =
-        std::max(spline_a.start_time(), spline_b.start_time());
-    const Time finish_time =
-        std::min(spline_a.finish_time(), spline_b.finish_time());
-
-    *motion_a = spline_a.to_fcl(start_time, finish_time);
-    *motion_b = spline_b.to_fcl(start_time, finish_time);
-
-    assert(profile_a->get_shape());
-    assert(profile_b->get_shape());
-    const auto obj_a = fcl::ContinuousCollisionObject(
-          geometry::FinalConvexShape::Implementation::get_collision(
-            *profile_a->get_shape()), motion_a);
-    const auto obj_b = fcl::ContinuousCollisionObject(
-          geometry::FinalConvexShape::Implementation::get_collision(
-            *profile_b->get_shape()), motion_b);
-
-    fcl::collide(&obj_a, &obj_b, request, result);
-    if(result.is_collide)
-    {
-      const double scaled_time = result.time_of_contact;
-      const Duration delta_t{
-        Duration::rep(scaled_time * (finish_time - start_time).count())};
-      const Time time = start_time + delta_t;
-      conflicts.emplace_back(Implementation::make_conflict(time, {a_it, b_it}));
-      if (quit_after_one)
-        return conflicts;
-    }
-
-    if(spline_a.finish_time() < spline_b.finish_time())
-    {
-      ++a_it;
-    }
-    else if(spline_b.finish_time() < spline_a.finish_time())
-    {
-      ++b_it;
-    }
-    else
-    {
-      ++a_it;
-      ++b_it;
-    }
-  }
-
-  return conflicts;
+  const double delta_t_inv = 1.0/params.delta_t;
+  return pow(delta_t_inv, 2 ) * rmf_traffic::compute_acceleration(
+        params, compute_scaled_time(at_time, params));
 }
 
-namespace internal {
 //==============================================================================
-bool detect_conflicts(
-    const Trajectory& trajectory,
-    const Spacetime& region,
-    std::vector<Trajectory::const_iterator>* output_iterators)
+const Spline::Parameters& Spline::get_params() const
 {
-#ifndef NDEBUG
-  // This should never actually happen because this function only gets used
-  // internally, and so there should be several layers of quality checks on the
-  // trajectories to prevent this. But we'll put it in here just in case.
-  if(trajectory.size() < 2)
-  {
-    std::cerr << "[rmf_traffic::internal::detect_conflicts] An invalid "
-              << "trajectory was passed to detect_conflicts. This is a bug "
-              << "that should never happen. Please alert the RMF developers."
-              << std::endl;
-    throw invalid_trajectory_error::Implementation
-        ::make_segment_num_error(trajectory.size());
-  }
-#endif // NDEBUG
-
-  const Time trajectory_start_time = *trajectory.start_time();
-  const Time trajectory_finish_time = *trajectory.finish_time();
-
-  const Time start_time = region.lower_time_bound?
-        std::max(*region.lower_time_bound, trajectory_start_time)
-      : trajectory_start_time;
-
-  const Time finish_time = region.upper_time_bound?
-        std::min(*region.upper_time_bound, trajectory_finish_time)
-      : trajectory_finish_time;
-
-  if(finish_time < start_time)
-  {
-    // If the trajectory or region finishes before the other has started, that
-    // means there is no overlap in time between the region and the trajectory,
-    // so it is impossible for them to conflict.
-    return false;
-  }
-
-  const Trajectory::const_iterator begin_it =
-      trajectory_start_time < start_time? trajectory.find(start_time)
-	: ++trajectory.begin();
-
-  const Trajectory::const_iterator end_it =
-      finish_time < trajectory_finish_time?
-        ++trajectory.find(finish_time) : trajectory.end();
-
-  std::shared_ptr<fcl::SplineMotion> motion_trajectory =
-      make_uninitialized_fcl_spline_motion();
-  std::shared_ptr<internal::StaticMotion> motion_region =
-      std::make_shared<internal::StaticMotion>(region.pose);
-
-  const fcl::ContinuousCollisionRequest request = make_fcl_request();
-
-  bool collision_detected = false;
-
-  for(auto it = begin_it; it != end_it; ++it)
-  {
-    const Trajectory::ConstProfilePtr profile = it->get_profile();
-
-    Spline spline_trajectory{it};
-
-    const Time spline_start_time =
-        std::max(spline_trajectory.start_time(), start_time);
-    const Time spline_finish_time =
-        std::min(spline_trajectory.finish_time(), finish_time);
-
-    *motion_trajectory = spline_trajectory.to_fcl(
-          spline_start_time, spline_finish_time);
-
-    assert(profile->get_shape());
-    const auto obj_trajectory = fcl::ContinuousCollisionObject(
-          geometry::FinalConvexShape::Implementation::get_collision(
-            *profile->get_shape()), motion_trajectory);
-
-    assert(region.shape);
-    const auto& region_shapes = geometry::FinalShape::Implementation
-        ::get_collisions(*region.shape);
-    for(const auto& region_shape : region_shapes)
-    {
-      const auto obj_region = fcl::ContinuousCollisionObject(
-            region_shape, motion_region);
-
-      fcl::ContinuousCollisionResult result;
-      fcl::collide(&obj_trajectory, &obj_region, request, result);
-      if(result.is_collide)
-      {
-        if(output_iterators)
-        {
-          output_iterators->push_back(it);
-          collision_detected = true;
-        }
-        else
-        {
-          return true;
-        }
-      }
-    }
-  }
-
-  return collision_detected;
+  return params;
 }
-} // namespace internal
 
 } // namespace rmf_traffic
 
