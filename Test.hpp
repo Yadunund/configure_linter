@@ -28,6 +28,8 @@ relevant_changes.emplace_back(
   Database::Change::Implementation::make_insert_ref(
     &entry->trajectory, entry->version));
 
+elements.emplace_back(Viewer::View::Element{
+  entry->version, entry->trajectory});
 
 result._pimpl = rmf_utils::make_impl<Implementation>(
   Implementation{make_deep(std::move(trajectory)),
@@ -188,3 +190,26 @@ if (min_size < 2)
 const Trajectory::const_iterator begin_it =
   trajectory_start_time < start_time ?
     trajectory.find(start_time) : ++trajectory.begin();
+
+const Eigen::Vector2d p = n->waypoint ?
+  graph.waypoints[*n->waypoint].get_location() :
+  n->trajectory_from_parent.back().get_finish_position()
+    .template block<2, 1>(0, 0);
+
+rmf_utils::optional<Plan> Plan::replan(const Start& new_start) const
+{
+  return Plan::Implementation::generate(
+    _pimpl->cache_mgr,
+    {new_start},
+    _pimpl->result.goal,
+    _pimpl->result.options);
+}
+
+rmf_utils::optional<Plan> Planner::plan(const Start& start, Goal goal) const
+{
+  return Plan::Implementation::generate(
+        _pimpl->cache_mgr,
+        {start},
+        std::move(goal),
+        _pimpl->default_options);
+}

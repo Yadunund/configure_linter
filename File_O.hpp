@@ -1,309 +1,215 @@
-/*
- * Copyright (C) 2019 Open Source Robotics Foundation
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
-*/
-
-//test
-// test
-#include "Spline.hpp"
-
-namespace rmf_traffic {
-
-namespace {
-
-//==============================================================================
-Eigen::Matrix4d make_M_inv()
+class Shape::Internal
 {
-  Eigen::Matrix4d M;
-  M.block<1,4>(0,0) <<  1.0/6.0, 2.0/3.0,  1.0/6.0,     0.0;
-  M.block<1,4>(1,0) << -1.0/2.0,     0.0,  1.0/2.0,     0.0;
-  M.block<1,4>(2,0) <<  1.0/2.0,    -1.0,  1.0/2.0,     0.0;
-  M.block<1,4>(3,0) << -1.0/6.0, 1.0/2.0, -1.0/2.0, 1.0/6.0;
+public:
 
-  return M.inverse();
-}
+  virtual CollisionGeometries make_fcl() const = 0;
 
-//==============================================================================
-double compute_delta_t(const Time& finish_time, const Time& start_time)
-{
-  using Sec64 = std::chrono::duration<double>;
-  return std::chrono::duration_cast<Sec64>(finish_time - start_time).count();
-}
+};
 
-//==============================================================================
-std::array<Eigen::Vector4d, 3> compute_coefficients(
-    const Eigen::Vector3d& x0,
-    const Eigen::Vector3d& x1,
-    const Eigen::Vector3d& v0,
-    const Eigen::Vector3d& v1)
-{
-  std::array<Eigen::Vector4d, 3> coeffs;
-  for(int i=0; i < 3; ++i)
-  {
-    std::size_t si = static_cast<std::size_t>(i);
-    coeffs[si][0] =                                x0[i]; // = d
-    coeffs[si][1] =            v0[i];                     // = c
-    coeffs[si][2] = -v1[i] - 2*v0[i] + 3*x1[i] - 3*x0[i]; // = b
-    coeffs[si][3] =  v1[i] +   v0[i] - 2*x1[i] + 2*x0[i]; // = a
-  }
-
-  return coeffs;
-}
-
-//==============================================================================
-Spline::Parameters compute_parameters(
-    const Trajectory::const_iterator& finish_it)
-{
-  const Trajectory::const_iterator start_it =
-      --Trajectory::const_iterator(finish_it);
-
-  const Trajectory::Segment& start = *start_it;
-  const Trajectory::Segment& finish = *finish_it;
-
-  const Time start_time = start.get_finish_time();
-  const Time finish_time = finish.get_finish_time();
-
-  const double delta_t = compute_delta_t(finish_time, start_time);
-
-  const Eigen::Vector3d x0 = start.get_finish_position();
-  const Eigen::Vector3d x1 = finish.get_finish_position();
-  const Eigen::Vector3d v0 = delta_t * start.get_finish_velocity();
-  const Eigen::Vector3d v1 = delta_t * finish.get_finish_velocity();
-
-  const rmf_traffic::Trajectory::ConstProfilePtr profile_ptr =
-      finish_it ->get_profile();
-
-  return {
-    profile_ptr,
-    compute_coefficients(x0, x1, v0, v1),
-    delta_t,
-    {start_time, finish_time}
-  };
-}
-
-//==============================================================================
-Spline::Parameters compute_parameters(
-    const internal::SegmentList::const_iterator& finish_it)
-{
-  const internal::SegmentList::const_iterator start_it =
-      --internal::SegmentList::const_iterator(finish_it);
-
-  const internal::SegmentElement::Data& start = start_it->data;
-  const internal::SegmentElement::Data& finish = finish_it->data;
-
-  const Time start_time = start.finish_time;
-  const Time finish_time = finish.finish_time;
-
-  const double delta_t = compute_delta_t(finish_time, start_time);
-
-  const Eigen::Vector3d x0 = start.position;
-  const Eigen::Vector3d x1 = finish.position;
-  const Eigen::Vector3d v0 = delta_t * start.velocity;
-  const Eigen::Vector3d v1 = delta_t * finish.velocity;
-
-  const rmf_traffic::Trajectory::ConstProfilePtr profile_ptr =
-      finish_it->data.profile;
-
-  return {
-    profile_ptr,
-    compute_coefficients(x0, x1, v0, v1),
-    delta_t,
-    {start_time, finish_time}
-  };
-}
-
-//==============================================================================
-double compute_scaled_time(const Time& time, const Spline::Parameters& params)
-{
-  using Sec64 = std::chrono::duration<double>;
-  const double relative_time =
-      std::chrono::duration_cast<Sec64>(time - params.time_range[0]).count();
-
-  const double scaled_time = relative_time / params.delta_t;
-  assert(0.0 - 1.0e-8 <= scaled_time);
-  assert(scaled_time <= 1.0 + 1.0e-8);
-
-  return scaled_time;
-}
-
-//==============================================================================
-Eigen::Vector3d compute_position(
-    const Spline::Parameters& params,
-    const double time)
-{
-  Eigen::Vector3d result = Eigen::Vector3d::Zero();
-  for(int i=0; i < 3; ++i)
-  {
-    const Eigen::Vector4d coeffs = params.coeffs[i];
-    for(int j=0; j < 4; ++j)
-      result[i] += coeffs[j] * pow(time, j);
-  }
-
-  return result;
-}
-
-//==============================================================================
-Eigen::Vector3d compute_velocity(
-    const Spline::Parameters& params,
-    const double time)
-{
-  Eigen::Vector3d result = Eigen::Vector3d::Zero();
-  for(int i=0; i < 3; ++i)
-  {
-    const Eigen::Vector4d coeffs = params.coeffs[i];
-    // Note: This is computing the derivative of the polynomial w.r.t. time
-    for(int j=1; j < 4; ++j)
-      result[i] += j * coeffs[j] * pow(time, j-1);
-  }
-
-  return result;
-}
-
-//==============================================================================
-Eigen::Vector3d compute_acceleration(
-    const Spline::Parameters& params,
-    const double time)
-{
-  Eigen::Vector3d result = Eigen::Vector3d::Zero();
-  for(int i=0; i < 3; ++i)
-  {
-    const Eigen::Vector4d coeffs = params.coeffs[i];
-    // Note: This is computing the second derivative w.r.t. time
-    for(int j=2; j < 4; ++j)
-      result[i] += j * (j-1) * coeffs[j] * pow(time, j-2);
-  }
-
-  return result;
-}
-
-} // anonymous namespace
-
-//==============================================================================
-const Eigen::Matrix4d M_inv = make_M_inv();
-
-//==============================================================================
-Spline::Spline(const Trajectory::const_iterator& it)
-  : params(compute_parameters(it))
+Planner::Configuration::Configuration(
+  Graph graph,
+  VehicleTraits traits,
+  Interpolate::Options interpolation)
+: _pimpl(rmf_utils::make_impl<Implementation>(
+    Implementation{
+      std::move(graph),
+      std::move(traits),
+      std::move(interpolation)
+      }))
 {
   // Do nothing
 }
 
-//==============================================================================
-Spline::Spline(const internal::SegmentList::const_iterator& it)
-  : params(compute_parameters(it))
+relevant_changes.emplace_back(
+  make_insert_ref{
+    &entry->trajectory, entry->version});
+
+relevant_changes.emplace_back(
+  Database::Change::Implementation::make_insert_ref(
+    &entry->trajectory, entry->version));
+
+elements.emplace_back(Viewer::View::Element{
+  entry->version, entry->trajectory});
+
+result._pimpl = rmf_utils::make_impl<Implementation>(
+  Implementation{make_deep(std::move(trajectory)),
+    std::forward<Args>(args)...});
+
+result._pimpl = rmf_utils::make_impl<FinalShape::Implementation>(
+  FinalShape::Implementation{std::move(shape),
+    std::move(collisions),
+    characteristic_length});
+
+span._pimpl->maps = std::unordered_set<std::string>{
+  std::make_move_iterator(maps.begin()),
+  std::make_move_iterator(maps.end())};
+
+for (Timeline::iterator it = timeline.begin(); it != end_it; ++it)
 {
-  // Do nothing
-}
-
-//==============================================================================
-std::array<Eigen::Vector3d, 4> Spline::compute_knots(
-    const Time start_time, const Time finish_time) const
-{
-  assert(params.time_range[0] <= start_time);
-  assert(finish_time <= params.time_range[1]);
-
-  const double scaled_delta_t =
-      compute_delta_t(finish_time, start_time) / params.delta_t;
-
-  const double scaled_start_time = compute_scaled_time(start_time, params);
-  const double scaled_finish_time = compute_scaled_time(finish_time, params);
-
-  const Eigen::Vector3d x0 =
-    rmf_traffic::compute_position(params, scaled_start_time);
-  const Eigen::Vector3d x1 =
-    rmf_traffic::compute_position(params, scaled_finish_time);
-  const Eigen::Vector3d v0 =
-    scaled_delta_t * rmf_traffic::compute_velocity(params, scaled_start_time);
-  const Eigen::Vector3d v1 =
-    scaled_delta_t * rmf_traffic::compute_velocity(params, scaled_finish_time);
-
-  const std::array<Eigen::Vector4d, 3> subspline_coeffs =
-      compute_coefficients(x0, x1, v0, v1);
-
-  std::array<Eigen::Vector3d, 4> result;
-  for(std::size_t i=0; i < 3; ++i)
+  Bucket& bucket = it->second;
+  const Bucket::iterator removed =
+    std::remove_if(bucket.begin(), bucket.end(),
+    [&](const internal::ConstEntryPtr& entry) -> bool
   {
-    const Eigen::Vector4d p = M_inv * subspline_coeffs[i];
-    for(int j=0; j < 4; ++j)
-      result[j][i] = p[j];
-  }
+    return *entry->trajectory.finish_time() < time;
+  });
 
-  return result;
+  for (Bucket::iterator bit = removed; bit != bucket.end(); ++bit)
+    culled.insert((*bit)->version);
+
+  bucket.erase(removed, bucket.end());
 }
 
-//==============================================================================
-fcl::SplineMotion Spline::to_fcl(
-    const Time start_time, const Time finish_time) const
+DerivedExecutor& execute(DerivedExecutor& executor) const
 {
-  std::array<Eigen::Vector3d, 4> knots = compute_knots(start_time, finish_time);
+  return static_cast<DerivedExecutor&>(
+    execute(static_cast<Executor&>(executor)));
+}
 
-  std::array<fcl::Vec3f, 4> Td;
-  std::array<fcl::Vec3f, 4> Rd;
+if (destination->data.finish_time == new_time)
+{
+  // The new time conflicts with an existing time, so we will throw an
+  // exception.
+  throw std::invalid_argument(
+    "[Trajectory::Segment::set_finish_time] Attempted to set time to "
+    + std::to_string(new_time.time_since_epoch().count())
+    + "ns, but a waypoint already exists at that timestamp.");
+}
 
-  for(std::size_t i=0; i < 4; ++i)
+Trajectory::InsertionResult Trajectory::insert(
+  Time finish_time,
+  ConstProfilePtr profile,
+  Eigen::Vector3d position,
+  Eigen::Vector3d velocity)
+{
+  return _pimpl->insert(
+    internal::SegmentElement::Data{
+      std::move(finish_time),
+      std::move(profile),
+      std::move(position),
+      std::move(velocity)});
+}
+
+bool VehicleTraits::valid() const
+{
+  const bool steering_valid = [&]() -> bool
   {
-    const Eigen::Vector3d p = knots[i];
-    Td[i] = fcl::Vec3f(p[0], p[1], 0.0);
-    Rd[i] = fcl::Vec3f(0.0, 0.0, p[2]);
-  }
+    if (_pimpl->_steering_mode == Steering::Differential)
+      return get_differential()->valid();
 
-  return fcl::SplineMotion(
-      Td[0], Td[1], Td[2], Td[3],
-      Rd[0], Rd[1], Rd[2], Rd[3]);
+    return true;
+  }();
+
+  return linear().valid() && rotational().valid() && steering_valid;
 }
 
-//==============================================================================
-Time Spline::start_time() const
+//
+
+bool A::a() const
 {
-  return params.time_range[0];
+  const bool c =
+    [&]() -> bool
+  {
+    if (_pimpl->_steering_mode == Steering::Differential)
+      return get_differential()->valid();
+
+    return true;
+  } ();
+
+  return linear().valid() && rotational().valid() && steering_valid;
 }
 
-//==============================================================================
-Time Spline::finish_time() const
+queue.emplace(std::make_shared<Node>(
+  Node{
+    args.waypoint,
+    estimate_remaining_cost(location),
+    0.0,
+    location,
+    nullptr
+  }));
+
+
+void func()
 {
-  return params.time_range[1];
+  return Result{
+    std::move(trajectories),
+    std::move(waypoints),
+    starts[start_index],
+    std::move(goal),
+    std::move(options)
+  };
 }
 
-//==============================================================================
-Eigen::Vector3d Spline::compute_position(const Time at_time) const
+namespace p {
+namespace q {
+
+const auto remove_it = std::remove_if(
+  _pimpl->itinerary.begin(),
+  _pimpl->itinerary.end(),
+  [&](const Writer::Item& item)
 {
-  return rmf_traffic::compute_position(
-        params, compute_scaled_time(at_time, params));
-}
+  return input_routes.count(item.id) > 0;
+});
 
-//==============================================================================
-Eigen::Vector3d Spline::compute_velocity(const Time at_time) const
+} // namespace q
+} // namespace p
+
+foo.emplace(std::make_shared<Bar>(
+  Bar{
+    a,
+    b,
+    b,
+  }));
+
+
+foo.emplace_back(
+  Bar{
+    a,
+    b,
+    c
+  });
+
+Foo::Foo(
+  A a,
+  B b)
+: _bar(std::make_shared<Bar>(
+    Bar{
+      a,
+      b,
+      }))
 {
-  const double delta_t_inv = 1.0/params.delta_t;
-  return delta_t_inv * rmf_traffic::compute_velocity(
-        params, compute_scaled_time(at_time, params));
+
 }
 
-//==============================================================================
-Eigen::Vector3d Spline::compute_acceleration(const Time at_time) const
+if (min_size < 2)
 {
-  const double delta_t_inv = 1.0/params.delta_t;
-  return pow(delta_t_inv, 2 ) * rmf_traffic::compute_acceleration(
-        params, compute_scaled_time(at_time, params));
+  throw invalid_trajectory_error::Implementation
+        ::make_segment_num_error(min_size);
 }
 
-//==============================================================================
-const Spline::Parameters& Spline::get_params() const
+const Trajectory::const_iterator begin_it =
+  trajectory_start_time < start_time ?
+    trajectory.find(start_time) : ++trajectory.begin();
+
+const Eigen::Vector2d p = n->waypoint ?
+  graph.waypoints[*n->waypoint].get_location() :
+  n->trajectory_from_parent.back().get_finish_position()
+    .template block<2, 1>(0, 0);
+
+rmf_utils::optional<Plan> Plan::replan(const Start& new_start) const
 {
-  return params;
+  return Plan::Implementation::generate(
+    _pimpl->cache_mgr,
+    {new_start},
+    _pimpl->result.goal,
+    _pimpl->result.options);
 }
 
-} // namespace rmf_traffic
-
+rmf_utils::optional<Plan> Planner::plan(const Start& start, Goal goal) const
+{
+  return Plan::Implementation::generate(
+        _pimpl->cache_mgr,
+        {start},
+        std::move(goal),
+        _pimpl->default_options);
+}
