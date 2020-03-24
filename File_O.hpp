@@ -560,8 +560,8 @@ bool detect_conflicts(
   }
 
   const Trajectory::const_iterator begin_it =
-      trajectory_start_time < start_time?
-        trajectory.find(start_time) : ++trajectory.begin();
+      trajectory_start_time < start_time? trajectory.find(start_time)
+	: ++trajectory.begin();
 
   const Trajectory::const_iterator end_it =
       finish_time < trajectory_finish_time?

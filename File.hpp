@@ -543,13 +543,13 @@ bool detect_conflicts(
   const Time trajectory_start_time = *trajectory.start_time();
   const Time trajectory_finish_time = *trajectory.finish_time();
 
-  const Time start_time = region.lower_time_bound?
-    std::max(*region.lower_time_bound, trajectory_start_time)
-      : trajectory_start_time;
+  const Time start_time = region.lower_time_bound ?
+    std::max(*region.lower_time_bound, trajectory_start_time) :
+    trajectory_start_time;
 
-  const Time finish_time = region.upper_time_bound?
-    std::min(*region.upper_time_bound, trajectory_finish_time)
-      : trajectory_finish_time;
+  const Time finish_time = region.upper_time_bound ?
+    std::min(*region.upper_time_bound, trajectory_finish_time) :
+    trajectory_finish_time;
 
   if (finish_time < start_time)
   {
@@ -560,11 +560,11 @@ bool detect_conflicts(
   }
 
   const Trajectory::const_iterator begin_it =
-    trajectory_start_time < start_time?
-    trajectory.find(start_time) : ++trajectory.begin();
+    trajectory_start_time < start_time ? trajectory.find(start_time) :
+    ++trajectory.begin();
 
   const Trajectory::const_iterator end_it =
-    finish_time < trajectory_finish_time?
+    finish_time < trajectory_finish_time ?
     ++trajectory.find(finish_time) : trajectory.end();
 
   std::shared_ptr<fcl::SplineMotion> motion_trajectory =

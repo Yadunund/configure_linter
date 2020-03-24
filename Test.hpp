@@ -179,3 +179,12 @@ Foo::Foo(
 
 }
 
+if (min_size < 2)
+{
+  throw invalid_trajectory_error::Implementation
+        ::make_segment_num_error(min_size);
+}
+
+const Trajectory::const_iterator begin_it =
+  trajectory_start_time < start_time ?
+    trajectory.find(start_time) : ++trajectory.begin();
