@@ -151,3 +151,31 @@ const auto remove_it = std::remove_if(
 
 } // namespace q
 } // namespace p
+
+foo.emplace(std::make_shared<Bar>(
+  Bar{
+    a,
+    b,
+    b,
+  }));
+
+
+foo.emplace_back(
+  Bar{
+    a,
+    b,
+    c
+  });
+
+Foo::Foo(
+  A a,
+  B b)
+: _bar(std::make_shared<Bar>(
+    Bar{
+      a,
+      b,
+      }))
+{
+
+}
+

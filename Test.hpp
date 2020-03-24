@@ -48,9 +48,9 @@ for (Timeline::iterator it = timeline.begin(); it != end_it; ++it)
   const Bucket::iterator removed =
     std::remove_if(bucket.begin(), bucket.end(),
     [&](const internal::ConstEntryPtr& entry) -> bool
-    {
-      return *entry->trajectory.finish_time() < time;
-    });
+  {
+    return *entry->trajectory.finish_time() < time;
+  });
 
   for (Bucket::iterator bit = removed; bit != bucket.end(); ++bit)
     culled.insert((*bit)->version);
@@ -101,7 +101,7 @@ bool VehicleTraits::valid() const
   return linear().valid() && rotational().valid() && steering_valid;
 }
 
-// 
+//
 
 bool A::a() const
 {
@@ -112,7 +112,7 @@ bool A::a() const
       return get_differential()->valid();
 
     return true;
-  }();
+  } ();
 
   return linear().valid() && rotational().valid() && steering_valid;
 }
@@ -125,3 +125,57 @@ queue.emplace(std::make_shared<Node>(
     location,
     nullptr
   }));
+
+
+void func()
+{
+  return Result{
+    std::move(trajectories),
+    std::move(waypoints),
+    starts[start_index],
+    std::move(goal),
+    std::move(options)
+  };
+}
+
+namespace p {
+namespace q {
+
+const auto remove_it = std::remove_if(
+  _pimpl->itinerary.begin(),
+  _pimpl->itinerary.end(),
+  [&](const Writer::Item& item)
+{
+  return input_routes.count(item.id) > 0;
+});
+
+} // namespace q
+} // namespace p
+
+foo.emplace(std::make_shared<Bar>(
+  Bar{
+    a,
+    b,
+    b,
+  }));
+
+
+foo.emplace_back(
+  Bar{
+    a,
+    b,
+    c
+  });
+
+Foo::Foo(
+  A a,
+  B b)
+: _bar(std::make_shared<Bar>(
+    Bar{
+      a,
+      b,
+      }))
+{
+
+}
+
