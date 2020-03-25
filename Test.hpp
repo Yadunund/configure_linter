@@ -199,7 +199,17 @@ const Eigen::Vector2d p = n->waypoint ?
 rmf_utils::optional<Plan> Plan::replan(const Start& new_start) const
 {
   return Plan::Implementation::generate(
-    _pimpl->cache_mgr,
+    _pimpl->cache_mgr,  DifferentialDriveCache(agv::Planner::Configuration config)
+  : _config(std::move(config)),
+    _graph(agv::Graph::Implementation::get(_config.graph())),
+    _traits(_config.vehicle_traits()),
+    _profile(_traits.get_profile()),
+    _interpolate(agv::Interpolate::Options::Implementation::get(
+        _config.interpolation()))
+  {
+    // Do nothing
+  }
+
     {new_start},
     _pimpl->result.goal,
     _pimpl->result.options);
@@ -219,4 +229,16 @@ foo.emplace_back(Bar{
   b,
   c
   });
+
+DifferentialDriveCache(agv::Planner::Configuration config)
+: _config(std::move(config)),
+  _graph(agv::Graph::Implementation::get(_config.graph())),
+  _traits(_config.vehicle_traits()),
+  _profile(_traits.get_profile()),
+  _interpolate(agv::Interpolate::Options::Implementation::get(
+      _config.interpolation()))
+{
+  // Do nothing
+}
+
 
