@@ -1,10 +1,8 @@
-if (true)
+if (!negotiation)
 {
-  if (!ecm.EntityHasComponentType(entity, components::JointPosition().TypeId()))
-  {
-
-  }
+  RCLCPP_WARN(
+        get_logger(),
+        "Received rejection for unknown negotiation ["
+        + std::to_string(msg.conflict_version) + "]");
+  return;
 }
-
-QPushButton *button =
-    new QPushButton(QString::fromStdString(floor_name));
