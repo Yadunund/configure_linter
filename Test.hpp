@@ -241,4 +241,7 @@ DifferentialDriveCache(agv::Planner::Configuration config)
   // Do nothing
 }
 
+negotiator->respond(
+      can_respond,
+      Responder(this, msg.conflict_version, can_respond));
 
