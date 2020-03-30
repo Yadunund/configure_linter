@@ -36,11 +36,6 @@ foo.emplace_back(
     bar));
 
 
-result = std::make_shared<Foo>(
-  FinalShape::Implementation{std::move(shape),
-    bar,
-    bar});
-
 // ( followed by { followed by (
 foo.emplace_back(
   Foo{
@@ -57,7 +52,7 @@ foo.emplace_back(
     Bar{
       bar3,
       bar4}
-    });
+  });
 
 // throw
 if (foo < bar)
@@ -97,6 +92,11 @@ foo.emplace_back(
         bar,
         bar});
 
+// ( followed by {
+foo.emplace_back(
+    FOO(
+        bar,
+        bar));
 
 // ( followed by (
 foo.emplace_back(
