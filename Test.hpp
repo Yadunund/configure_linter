@@ -245,3 +245,65 @@ negotiator->respond(
       can_respond,
       Responder(this, msg.conflict_version, can_respond));
 
+
+RCLCPP_WARN(
+    node.get_logger(),
+    "[rmf_traffic_ros2::~MirrorManagerFuture] Error received "
+    "while trying to unregister the query of an uninstantiated "
+    "MirrorManager: " + response->error);
+
+if (lane_dist < max_merge_lane_distance)
+{
+  starts.emplace_back(
+    Plan::Start(
+      start_time, exit_waypoint_index, start_yaw, p_location, i));
+}
+
+State(double s_in, double v_in, double t_in, Time t_start)
+: s(s_in),
+  v(v_in),
+  t(t_start +
+    std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::duration<double>(t_in)))
+{
+  // Do nothing
+}
+
+_pimpl->waypoints.emplace_back(
+  Waypoint::Implementation::make(
+    _pimpl->waypoints.size(),
+    std::move(map_name), std::move(location), is_holding_point));
+
+auto Query::Spacetime::query_timespan(
+  std::vector<std::string> maps) -> Timespan&
+{
+  _pimpl->mode = Mode::Timespan;
+  _pimpl->timespan_instance =
+    Timespan::Implementation::make(
+      std::move(maps),
+      rmf_utils::nullopt,
+      rmf_utils::nullopt);
+
+  return _pimpl->timespan_instance;
+}
+
+if (rectifier_factory)
+{
+  participant._pimpl->_rectification =
+    rectifier_factory->make(
+      Rectifier::Implementation::make(*participant._pimpl), id);
+}
+
+const auto insertion = p_changes.delays.insert(
+  std::make_pair(
+  traverse->schedule_version,
+  Delay{delay.from, delay.duration}));
+
+output_conflicts->emplace_back(
+  DetectConflict::Implementation::Conflict{
+    it, it,
+    compute_time(
+      result.time_of_contact,
+      spline_start_time,
+      spline_finish_time)
+  });

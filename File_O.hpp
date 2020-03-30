@@ -1,92 +1,132 @@
-/*
- * Copyright (C) 2019 Open Source Robotics Foundation
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
-*/
+// Original code is in correct Format
 
-#ifndef SRC__RMF_TRAFFIC__SCHEDULE__VIEWERINTERNAL_HPP
-#define SRC__RMF_TRAFFIC__SCHEDULE__VIEWERINTERNAL_HPP
-
-#include <rmf_traffic/schedule/Viewer.hpp>
-
-#include <vector>
-
-namespace rmf_traffic {
-namespace schedule {
-
-//==============================================================================
-class Viewer::View::Implementation
+Foo::Foo(
+  A a,
+  B b)
+: _bar(std::make_shared<Bar>(
+    Bar{
+      a,
+      b,
+    }))
 {
-public:
 
-  struct Storage
-  {
-    ParticipantId participant;
-    RouteId route_id;
-    ConstRoutePtr route;
-    std::shared_ptr<const ParticipantDescription> description;
-  };
+}
 
-  std::vector<Storage> storage;
-  std::vector<Element> elements;
+// single (
+foo.emplace_back(
+  bar,
+  bar);
 
-  static View make_view(std::vector<Storage> input)
-  {
-    std::vector<Element> elements = make_elements(input);
+// Single {
+foo = std::unordered_set<std::string>{
+  bar,
+  bar};
 
-    View view;
-    view._pimpl = rmf_utils::make_impl<Implementation>(
-      Implementation{
-        std::move(input),
-        std::move(elements)
-      });
-    return view;
-  }
+// ( followed by {
+foo.emplace_back(
+  FOO{
+    bar,
+    bar});
 
-  static void append_to_view(View& view, std::vector<Storage> input)
-  {
-    append_to_elements(view._pimpl->elements, input);
-    view._pimpl->storage.insert(
-      view._pimpl->storage.end(),
-      std::make_move_iterator(input.begin()),
-      std::make_move_iterator(input.end()));
-  }
 
-  static std::vector<Element> make_elements(
-    const std::vector<Storage>& input)
-  {
-    std::vector<Element> elements;
-    append_to_elements(elements, input);
-    return elements;
-  }
+// ( followed by (
+foo.emplace_back(
+  Foo::make_foo(
+    bar,
+    bar));
 
-  static void append_to_elements(
-    std::vector<Element>& elements,
-    const std::vector<Storage>& input)
-  {
-    elements.reserve(elements.size() + input.size());
-    for (const auto& s : input)
-    {
-      assert(s.route);
-      elements.emplace_back(
-        Element{s.participant, s.route_id, *s.route, *s.description});
-    }
-  }
-};
 
-} // namespace schedule
-} // namespace rmf_traffic
+result = std::make_shared<Foo>(
+  FinalShape::Implementation{std::move(shape),
+    bar,
+    bar});
 
-#endif // SRC__RMF_TRAFFIC__SCHEDULE__VIEWERINTERNAL_HPP
+// ( followed by { followed by (
+foo.emplace_back(
+  Foo{
+    bar1, bar2,
+    func(
+      bar1,
+      bar2)
+  });
+
+// ( followed by { followed by {
+foo.emplace_back(
+  Foo{
+    bar1, bar2,
+    Bar{
+      bar3,
+      bar4}
+    });
+
+// throw
+if (foo < bar)
+{
+  throw std::invalid_argument(
+    "Error line1"
+    + "Error lin2");
+}
+
+
+// Original code is in incorrect format (Indent needs to be shifted in)
+
+Foo::Foo(
+    A a,
+    B b)
+: _bar(std::make_shared<Bar>(
+      Bar{
+          a,
+          b,
+      }))
+{
+
+}
+// single (
+foo.emplace_back(
+    bar,
+    bar);
+
+// Single {
+foo = std::unordered_set<std::string>{
+    bar,
+    bar};
+
+// ( followed by {
+foo.emplace_back(
+    FOO{
+        bar,
+        bar});
+
+
+// ( followed by (
+foo.emplace_back(
+    Foo::make_foo(
+        bar,
+        bar));
+
+// ( followed by { followed by (
+foo.emplace_back(
+    Foo{
+        bar1, bar2,
+        func(
+            bar1,
+            bar2)
+     });
+
+// ( followed by { followed by {
+foo.emplace_back(
+    Foo{
+        bar1, bar2,
+        Bar{
+            bar3,
+            bar4}
+     });
+
+// throw
+if (foo < bar)
+{
+  throw std::invalid_argument(
+      "Error line1"
+      + "Error lin2");
+}
 
